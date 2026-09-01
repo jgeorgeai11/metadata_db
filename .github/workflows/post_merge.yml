@@ -1,0 +1,270 @@
+# .github/workflows/post_merge.yml — metadata_db post-merge (main) jobs
+#
+# Captures the design from MAINTAINING.md:
+#   1. unit_tests_main: run the unit-test suite on main-branch code
+#      changes, so a loader-code break surfaces at its own merge.
+#   2. load_catalog_data: real load, only when corpus YAML changed.
+#   3. revert_failed_load: on a load failure, push a clean revert of the
+#      failed merge so main and the DB stay in sync.
+# The pre-merge (PR) jobs live in pre_merge.yml, whose header carries
+# the shared documentation: the METADATA_DB_CI_ENABLED activation gate,
+# the self-hosted-runner prerequisites (including the
+# [self-hosted, linux, docker] label set every `runs-on` here selects
+# on), the toolchain pins (the uv version and `uv run --locked`), and
+# the two-role credential split. Write credentials (POSTGRES_* for
+# metadata_db_ci, plus CLEANUP_BOT_TOKEN) live in the
+# `metadata-db-write` deployment environment, restricted to the `main`
+# branch, so a PR that edits a workflow file can never read them — the
+# GitHub analogue of GitLab's protected variables.
+#
+# ── PATH GATING AND THE LOAD/REVERT PAIRING ───────────────────────────
+# Path gating happens in per-job change-detection STEPS, not
+# trigger-level `paths:` filters: the jobs gate on different paths, and
+# `paths:` is evaluated once at the workflow trigger. The pairing
+# constraint the GitLab config preserved verbatim carries over:
+# revert_failed_load `needs:` the load job and must exist in exactly
+# the same runs — here both jobs exist in every push run, the load
+# gates its work on a corpus-YAML change, and the revert fires only on
+# `needs.load_catalog_data.result == 'failure'` (scoped to the load
+# job's outcome, not any workflow failure) and re-checks the same path
+# gate itself before pushing anything.
+#
+# On a push to main, $GITHUB_SHA is the just-landed commit — for a PR
+# merged with the (required) merge-commit method, the merge commit
+# itself. That is the SHA load_audit records and the SHA the revert
+# reverts.
+
+name: post_merge
+
+on:
+  push:
+    branches: [main]
+
+# None of these jobs uses the workflow token at all — the revert
+# authenticates as the cleanup bot via CLEANUP_BOT_TOKEN — so without
+# this block they would inherit the repository/organization default
+# GITHUB_TOKEN scope (historically read-write) for nothing. The
+# exposure is smaller than pre_merge.yml's (this workflow runs
+# reviewed, on-main code), but the declaration costs nothing and keeps
+# the two workflows consistent.
+permissions:
+  contents: read
+
+# Serialize post-merge runs: a second merge's run queues behind an
+# in-flight load instead of racing it. This is the Actions replacement
+# for the semaphore workaround the GitLab design documented; true merge
+# serialization (one merge fully loaded-or-reverted before the next
+# lands) needs the merge queue — see "GitHub platform settings" in the
+# maintenance doc. Note GitHub keeps only the NEWEST pending run per
+# group (an intermediate queued run is superseded). That is safe for the
+# LOAD — the loader is full-state, so the newest run loads the complete
+# corpus at its own commit, covering any superseded merge's changes —
+# but a superseded run also drops unit_tests_main for its commit, and
+# since each run's gate diffs only its own push, a code/ change merged
+# between two rapid merges then goes untested on main until the next
+# code/ merge. The DB-level advisory lock remains the correctness
+# backstop for the load either way.
+concurrency:
+  group: metadata-db-post-merge
+  cancel-in-progress: false
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Run the unit-test suite on every main-branch commit that touches
+  # `code/**`, so a loader-code break surfaces at its own merge instead
+  # of detonating (and auto-reverting) the next innocent data PR's
+  # post-merge load. Integration tests stay env-gated (self-skip). No
+  # DB access — no credentials needed.
+  # ─────────────────────────────────────────────────────────────────────
+  unit_tests_main:
+    if: vars.METADATA_DB_CI_ENABLED == 'true'
+    runs-on: [self-hosted, linux, docker]   # labels applied at runner registration
+    # Every job here carries a timeout. The concurrency group above uses
+    # cancel-in-progress: false, so a job hung on an unreachable
+    # Postgres would hold the runner AND the queue for GitHub's
+    # 360-minute default, blocking every subsequent merge's run — and
+    # the load would do it while holding the loader's DB advisory lock.
+    timeout-minutes: 30
+    # python:3.14-slim matches the project's `requires-python >= 3.14` /
+    # `.python-version`, so uv never has to download a managed
+    # interpreter per job (which a restricted runner may not even be
+    # able to do). pip install uv adds ~5s per job and is fully portable
+    # across runners.
+    container:
+      image: python:3.14-slim
+    steps:
+      # The slim image ships without git; see pre_merge.yml for why it
+      # is installed uniformly before checkout.
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@v4
+        with:
+          # Full history, not depth 2: the gate below diffs from
+          # github.event.before, which can be any distance back.
+          fetch-depth: 0
+          # No job here pushes with the workflow token (the revert
+          # authenticates as the cleanup bot), so the checkout default
+          # would write an http.extraheader bearing the GITHUB_TOKEN
+          # into .git/config for nothing. Same discipline
+          # code/revert_merge/git_ops.py keeps for its own token:
+          # nothing token-bearing is ever persisted in .git/config, so
+          # on a reused runner workspace the credential cannot outlive
+          # the job.
+          persist-credentials: false
+      # The gate diffs the push's TRUE previous tip against the pushed
+      # commit. `HEAD^ HEAD` would cover only the tip COMMIT, which
+      # equals the push only while the merge-commit-only and
+      # no-direct-push settings hold (items 5 and 6 of the activation
+      # checklist, neither applied yet) — a multi-commit push, e.g. an
+      # emergency or admin push, would compare against the wrong base
+      # and skip the work silently. github.event.before is the push
+      # event's own previous tip: exact regardless of push shape, and
+      # GitHub-generated (a SHA), so interpolating it into the script
+      # opens no injection surface.
+      #
+      # The diff is captured into a variable rather than piped straight
+      # into `grep`: a pipeline yields grep's status, so a git failure
+      # (an unreachable `before` after a force push, say) would be
+      # indistinguishable from "nothing matched" and would write
+      # run=false. Assigning the command substitution lets the step's
+      # default `bash -e` abort on the git failure instead, so the gate
+      # fails CLOSED — a red run for a human to read, never a silent
+      # skip. Both gates below do the same.
+      - name: Detect code changes
+        id: changes
+        run: |
+          CHANGED="$(git diff --name-only \
+              "${{ github.event.before }}" "$GITHUB_SHA" -- code/)"
+          if [ -n "$CHANGED" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install uv
+        if: steps.changes.outputs.run == 'true'
+        run: pip install --no-cache-dir "uv==0.11.1"
+      - name: Run unit tests
+        if: steps.changes.outputs.run == 'true'
+        run: uv run --locked pytest code/
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Apply the YAML corpus to Postgres. Fires only when corpus YAML
+  # changed — the data_catalog/systems.yaml venue registry or anything
+  # under data_catalog/sources/ — so commits to main that don't touch
+  # YAML (docs, CI changes, loader edits) skip the load entirely. Runs
+  # as the write role (metadata_db_ci) via the `metadata-db-write`
+  # environment's POSTGRES_* secrets.
+  # ─────────────────────────────────────────────────────────────────────
+  load_catalog_data:
+    if: vars.METADATA_DB_CI_ENABLED == 'true'
+    runs-on: [self-hosted, linux, docker]   # labels applied at runner registration
+    timeout-minutes: 30
+    environment: metadata-db-write
+    container:
+      image: python:3.14-slim
+    env:
+      POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Same gate shape as unit_tests_main — see there for why the base
+      # is github.event.before and why the diff is captured instead of
+      # piped. Failing closed matters most here: a silently skipped load
+      # leaves main ahead of Postgres with a GREEN run and no signal —
+      # the exact invariant this workflow exists to protect — and the
+      # mirror gate in revert_failed_load would then decline to revert
+      # as well. A git failure now fails the JOB instead: the run is
+      # red, the revert is armed, and the revert's mirror gate — which
+      # hits the same git failure — refuses to push, leaving the state
+      # to a human. That is the intended order (the revert script's
+      # preconditions are the last line of defense, not the first).
+      - name: Detect corpus YAML changes
+        id: changes
+        run: |
+          CHANGED="$(git diff --name-only \
+              "${{ github.event.before }}" "$GITHUB_SHA" -- data_catalog/)"
+          if printf '%s\n' "$CHANGED" | grep -q '\.yaml$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install uv
+        if: steps.changes.outputs.run == 'true'
+        run: pip install --no-cache-dir "uv==0.11.1"
+      - name: Load the corpus
+        if: steps.changes.outputs.run == 'true'
+        run: >
+          uv run --locked code/load_catalog_data/load_catalog_data.py
+          --config code/load_catalog_data/config/load_catalog_data.toml
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Post-merge fallback: if the load job failed, push a clean revert of
+  # the failed merge so main and the DB stay in sync. Authenticates as
+  # the cleanup bot, which is the only identity allowed to push to main
+  # directly (its branch-protection bypass allowance — see the
+  # maintenance doc).
+  #
+  # The `if:` is scoped to the LOAD job's result — not `failure()`
+  # across the run — so an unrelated job failure never triggers a
+  # revert. The change-detection step mirrors load_catalog_data's
+  # exactly, for the same reason the GitLab `changes:` rules mirrored
+  # each other: the revert must only ever fire for a corpus-YAML merge.
+  # If the load job failed BEFORE its own gate (e.g. checkout or the
+  # git install flaked on a docs commit), the mirror gate here refuses
+  # to push — the revert script's HEAD/merge-commit preconditions are
+  # the last line of defense, not the first. `fetch-depth: 0` forces a
+  # full (unshallow) clone so `git rev-list --parents` and the revert
+  # never operate on a shallow history.
+  # ─────────────────────────────────────────────────────────────────────
+  revert_failed_load:
+    if: vars.METADATA_DB_CI_ENABLED == 'true' && needs.load_catalog_data.result == 'failure'
+    needs: [load_catalog_data]
+    runs-on: [self-hosted, linux, docker]   # labels applied at runner registration
+    timeout-minutes: 30
+    environment: metadata-db-write
+    container:
+      image: python:3.14-slim
+    env:
+      CLEANUP_BOT_TOKEN: ${{ secrets.CLEANUP_BOT_TOKEN }}
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # revert_merge.py builds its own authenticated remote URL from
+          # CLEANUP_BOT_TOKEN and passes it per command, so a persisted
+          # GITHUB_TOKEN header would be a second credential sitting in
+          # the .git/config of the very workspace the revert pushes
+          # from — exactly what git_ops.py's hygiene contract rules out.
+          persist-credentials: false
+      # Mirrors load_catalog_data's gate VERBATIM (same base, same
+      # test), per the pairing rule above — a difference here would let
+      # the revert fire for a merge the load never touched, or decline
+      # for one it did.
+      - name: Detect corpus YAML changes
+        id: changes
+        run: |
+          CHANGED="$(git diff --name-only \
+              "${{ github.event.before }}" "$GITHUB_SHA" -- data_catalog/)"
+          if printf '%s\n' "$CHANGED" | grep -q '\.yaml$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install uv
+        if: steps.changes.outputs.run == 'true'
+        run: pip install --no-cache-dir "uv==0.11.1"
+      - name: Revert the failed merge
+        if: steps.changes.outputs.run == 'true'
+        run: >
+          uv run --locked code/revert_merge/revert_merge.py
+          --config code/revert_merge/config/revert_merge.toml
+          --commit-sha "$GITHUB_SHA"

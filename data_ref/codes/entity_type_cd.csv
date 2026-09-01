@@ -1,0 +1,3 @@
+code,description,notes
+1,Individual provider,"Populates the individual name, credential, and gender columns; may self-report sole-proprietor status"
+2,Organization provider,"Populates provider_organization_name; may carry alternate names in the other_name file"

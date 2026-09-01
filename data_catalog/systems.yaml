@@ -1,0 +1,23 @@
+# data_catalog/systems.yaml
+# The venue registry: one entry per queryable platform data can be hosted
+# in. Loads into `systems` rows. Systems are referenced only by
+# deployments — no catalog id contains a system name.
+#
+# A venue is a query context — defined by how data is addressed and
+# queried, not by where the bytes sit — so one infrastructure can host
+# more than one (a parquet store on the warehouse platform would register
+# as its own system, e.g. warehouse_lake, beside the existing warehouse).
+# Suffix the name with the context only when the platform actually
+# hosts more than one; until then a platform keeps its bare name
+# (warehouse, metadata_db) — renaming later is cheap, since system
+# names appear in no catalog id.
+
+- system: warehouse
+  description: The research data warehouse hosting the demo corpus's public datasets, addressed and queried through its SQL engine. Currently the platform's only query context; a future non-SQL store there (e.g. a parquet lake) registers as its own system.
+  notes: null
+  update_reason: null
+
+- system: metadata_db
+  description: The catalog's own Postgres instance. Hosts the `reference` schema (curated code-set tables, documented as the `ref` data source) alongside the catalog itself.
+  notes: Ref tables exist for context retrieval (resolving what a code means), not for runtime joins — see MAINTAINING.md for the ref architecture and runbook.
+  update_reason: null

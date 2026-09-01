@@ -1,0 +1,11 @@
+# data_catalog/sources/nppes/general/table_relationships.yaml
+
+- table_a_id: nppes.general.npi
+  table_b_id: nppes.general.other_name
+  relationship_name: default
+  join_condition: nppes.general.npi.npi = nppes.general.other_name.npi
+  cardinality: null
+  use_when: null
+  notes: 'Expected one_to_many (one main-file row to zero-or-more alternate names; only organization providers appear in other_name); cardinality stays null until confirmed against real data per CONTRIBUTING.md.'
+  validated: false
+  update_reason: null

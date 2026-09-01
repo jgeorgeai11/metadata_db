@@ -1,0 +1,34 @@
+---
+name: cr_20260803v01_test_apply_ddl
+goal: Re-review of code/apply_ddl/unit_tests/test_apply_ddl.py since cr_20260730v01, covering the new strip_sql_comments direct test and the concept_id shape-check update (3-6 labels), against the python-development unit-tests, comments, docstrings, type-hints, and exception-handling skills.
+created: 2026-08-03 10:06:29
+updated: 2026-08-03 10:06:29
+---
+
+## Implementation Plan
+
+1. [completed] Optional test-quality enhancements (carried forward from cr_20260713v01 through cr_20260730v01) - `code/apply_ddl/unit_tests/test_apply_ddl.py`
+   - 1.1. [suggestion] Lines 591-813: The `run()` happy-path tests assert branching (which migrations apply, when create/verify/schema fire) but none asserts that the target connection is closed. `run()` closes it in a `finally` block; if that cleanup were dropped, every `run` test would still pass. The same guarantee is already locked in for `create_database_if_absent` (close asserted at lines 493, 512, 532). Adding one close assertion to a happy-path test (e.g. `test_run_applies_only_pending`, line 705) would restore that symmetry.
+        - Current: `apply_ddl.run(_config(), check_only=False, create_db=False)` (no cleanup assertion)
+        - Expected: add `patched_run["connect"].return_value.close.assert_called_once()` after the call
+        - Resolution: Deferred — optional cleanup-assertion symmetry, not a defect; deliberated and deferred across cr_20260713v01, cr_20260717v01, cr_20260729v01, and cr_20260730v01, and untouched by the changes since. Left for a future dedicated test-cleanup pass.
+   - 1.2. [suggestion] Lines 218-225: `test_ensure_ddl_versions_pins_applied_ts_column` pins the `applied_ts` column shape by asserting on `inspect.getsource(apply_ddl.ensure_ddl_versions)` — an assertion on source text (internal state; unit-tests guideline 6) rather than on observable behavior, plus a function-level `import inspect` (line 222). The sibling test `test_ensure_ddl_versions_creates_and_commits` (lines 201-215) already asserts on the SQL actually passed to `fake_cursor.execute`; the same pin could live there as one more substring assertion on `create_sql`, retiring the `inspect` import.
+        - Current: `source = inspect.getsource(apply_ddl.ensure_ddl_versions)` / `assert "applied_ts timestamptz not null default now()" in source`
+        - Expected: in `test_ensure_ddl_versions_creates_and_commits`, add `assert "applied_ts timestamptz not null default now()" in create_sql` and delete the source-inspection test
+        - Resolution: Deferred — optional; the test's intent (pinning the docs' `ddl_versions` snippet) is explicitly commented, the pin is equally effective either way, and the pattern has been accepted through several prior review cycles. Fold into a future test-cleanup pass alongside 1.1.
+   - 1.3. [suggestion] Lines 910-1017: Tests for `list_repo_migrations` and `run()` are split across non-contiguous sections — `list_repo_migrations` at lines 31-91 and again at 910-942 ("case-variant .sql extension"), `run` at 536-813 and again at 945-1017 ("--allow-pending exemption and permissions-vs-absent split"). Consolidating each function's tests under one divider would make the file's structural map easier to scan as it grows (now 1550 lines).
+        - Current: two `list_repo_migrations` sections and two `run` sections, appended in the order features landed
+        - Expected: move the later blocks up under their original dividers (or merge the divider titles)
+        - Resolution: Deferred — purely organizational; every divider is accurate for the tests beneath it, and append-style growth keeps feature diffs small and reviewable. Not worth a 100+-line reshuffle outside a dedicated cleanup pass.
+
+## Skills with No Issues
+
+1. unit-tests skill: No new issues; only the deferred suggestions 1.1-1.3 remain. cr_20260730v01's sole minor (1.1, stale `strip_sql_comments` divider) is resolved exactly as specified: `test_strip_sql_comments_removes_line_and_block_comments` (lines 879-892) now calls the public function directly and asserts exact output equality, making the divider at line 817 truthful and closing the last gap in public-function coverage (guideline 7). The only other change since, in `test_ddl_0001_concept_id_shape_check_present` (lines 1434-1443), pins the widened CHECK and matches the shipped DDL verbatim (`nlevel(concept_id) between 3 and 6`, 0001_initial_schema.sql line 375). Conventions remain strong throughout: pytest (not unittest), `test_<function>_<scenario>_<expected>` naming, shared `fake_conn`/`fake_cursor` fixtures from conftest.py, and idiomatic use of `tmp_path`/`monkeypatch`/`caplog` and `@pytest.mark.parametrize` with ids. The stdlib `unittest.mock` + `monkeypatch` combination (instead of `mocker.patch()`) remains an accepted project deviation, and mocking `run()`'s own leaf helpers is documented in the module docstring (lines 3-5). All 138 tests pass (0.40s).
+2. type-hints skill: No issues found. All test functions, fixtures, and helpers carry parameter and return annotations using modern syntax (`list[tuple[str, Path]]`, `dict[str, MagicMock]`, `set[str]`, `-> None`); the new strip-comments test is annotated `-> None`, and the `*a: object, **k: object` stubs remain appropriately typed for throwaway callables.
+3. docstrings skill: No issues found. The module docstring and the `_migrations`/`patched_run`/`_config`/`_sql_text_without_comments`/`_ddl_text_without_comments`/`_created_tables`/`_table_body` helper docstrings are present and explain intent (`_table_body` includes Args/Returns); individual test functions are conventionally self-documenting via their names.
+4. comments skill: No issues found. The rewritten comment on `test_ddl_0001_concept_id_shape_check_present` (lines 1435-1440) accurately describes the 3-6-label shape and correctly points to the env-gated integration suite at code/load_catalog_data/unit_tests/test_integration.py (path verified); the new strip-test comment (lines 880-883) states the pinned contract precisely; all other inline comments remain accurate against the current source.
+5. exception-handling skill: No issues found. Expected errors are asserted with `pytest.raises(..., match=...)`; error-injection stubs raise specific types (`RuntimeError`, `KeyError`, `SystemExit`, `psycopg2.Error`); no bare excepts in test code.
+6. logging skill: N/A - test module; `setup_logging` is stubbed and `caplog` is used correctly to assert emitted ERROR/INFO text in the `main()` tests.
+7. executable-scripts skill: N/A - this is a test module, not a CLI entry point.
+8. data-validation skill: N/A - no data-output validation logic in the tests.
+9. sql-development skill: N/A - SQL appears only as literal assertion substrings and regex pins against shipped DDL files; no queries are authored in this file.

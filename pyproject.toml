@@ -1,0 +1,30 @@
+[project]
+name = "metadata-db"
+version = "0.1.0"
+description = "Catalog of schemas, joins, and cross-system column mappings for research data systems."
+# README is the front page; CONTRIBUTING, MAINTAINING, and SCHEMA sit
+# alongside it at the repo root.
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    # pandas and pyreadstat serve the SAS schema-extraction tooling, run via
+    # `uv run` against this project's environment.
+    "pandas>=2.2",
+    "psycopg2-binary",
+    "pyreadstat>=1.2",
+    "python-dotenv>=1.2.2",
+    "python-json-logger",
+    "pyyaml>=6.0.3",
+    "sqlglot>=30.8.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: end-to-end tests that touch a real Postgres (gated by METADATA_DB_INTEGRATION=1)",
+]

@@ -1,0 +1,34 @@
+# data_catalog/sources/mup_phy/general/mappings/nppes.yaml
+# Column mappings mup_phy.general.provider_summary -> nppes.
+
+- source_column_id: mup_phy.general.provider_summary.rndrng_npi
+  mapping_name: default
+  target_expression: nppes.general.npi.npi
+  use_when: null
+  notes: 'Confidence: high. Both are the 10-digit NPI; the PUF is keyed on it and NPPES is the registry that assigns it.'
+  validated: false
+  update_reason: null
+
+- source_column_id: mup_phy.general.provider_summary.rndrng_prvdr_gndr
+  mapping_name: default
+  target_expression: nppes.general.npi.provider_gender_code
+  use_when: null
+  notes: 'Confidence: high. Same M/F vocabulary; NPPES is the self-reported registry value while the PUF carries the value recorded at claim time.'
+  validated: false
+  update_reason: null
+
+- source_column_id: mup_phy.general.provider_summary.rndrng_prvdr_ent_cd
+  mapping_name: default
+  target_expression: CASE nppes.general.npi.entity_type_code WHEN '1' THEN 'I' WHEN '2' THEN 'O' END
+  use_when: null
+  notes: 'Confidence: high. Same distinction, different vocabulary -- NPPES enumerates 1 (individual) / 2 (organization) where the PUF uses I / O.'
+  validated: false
+  update_reason: null
+
+- source_column_id: mup_phy.general.provider_summary.rndrng_prvdr_crdntls
+  mapping_name: default
+  target_expression: nppes.general.npi.provider_credential_text
+  use_when: null
+  notes: 'Confidence: medium. Both are free-text credentials, but formatting differs (the PUF tends to carry punctuated forms like M.D. where NPPES carries what the provider typed at enumeration) -- equivalent in meaning, not byte-for-byte.'
+  validated: false
+  update_reason: null

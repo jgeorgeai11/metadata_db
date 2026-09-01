@@ -1,0 +1,31 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+.claude
+logs
+
+# Secrets / local environment
+.env
+.env.*
+
+# pgweb bookmark files hold the pgweb_ro password; only the .example is tracked
+code/pgweb/bookmarks/*.toml
+!code/pgweb/bookmarks/*.toml.example
+
+# Test / coverage artifacts
+.coverage
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Resolver run output
+output/

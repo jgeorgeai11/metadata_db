@@ -1,0 +1,37 @@
+# data_catalog/sources/nppes/concepts.yaml
+# Data-source-level concepts on nppes. The `name` is the id relative to
+# this folder, written concept.<leaf>, so concept_id = folder prefix +
+# `.` + name (nppes.concept.<leaf>) with nothing inserted.
+
+- name: concept.provider_identity
+  label: The NPI as provider identity
+  definition: >-
+    The NPI (National Provider Identifier) is the single national key for a
+    health care provider, and NPPES is the registry that assigns it. Within
+    this source it is the grain of the main file and the join key to the
+    supplemental files; across sources it is the standard linkage key --
+    any dataset carrying a rendering, billing, or referring provider
+    identifier at the individual or organization level is expected to carry
+    an NPI, and cross-dataset provider linkage should happen on it rather
+    than on names or legacy identifiers.
+  notes: null
+  related_object_ids:
+    - nppes.general.npi.npi
+    - nppes.general.other_name.npi
+
+- name: concept.entity_type
+  label: Individual vs organization providers
+  definition: >-
+    Every active NPI is enumerated as exactly one of two entity types --
+    an individual (entity_type_code 1) or an organization
+    (entity_type_code 2) -- and the two types populate disjoint name
+    columns: individuals carry last/first/middle name, credential, and
+    gender; organizations carry the legal business name and may carry
+    alternate names in the other_name file. Consumers filtering to one
+    provider kind should filter on entity_type_code, not on which name
+    columns happen to be populated.
+  notes: null
+  related_object_ids:
+    - nppes.general.npi.entity_type_code
+    - nppes.general.npi.provider_organization_name
+    - nppes.general.npi.provider_last_name

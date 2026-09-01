@@ -1,0 +1,4 @@
+# data_catalog/sources/nppes/deployments.yaml
+# Venues this data source is materialized in. A bare entry means every
+# documented schema and table is deployed under its original names.
+- system: warehouse

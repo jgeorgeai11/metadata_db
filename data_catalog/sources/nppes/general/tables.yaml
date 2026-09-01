@@ -1,0 +1,12 @@
+# data_catalog/sources/nppes/general/tables.yaml
+# table_id = nppes.general.<table_name>.
+
+- table_name: npi
+  description: One row per NPI (National Provider Identifier) -- the main NPPES public dissemination file, covering individual and organization provider identity, enumeration and deactivation dates, gender, primary taxonomy, and sole-proprietor status.
+  notes: 'The public layout carries no explicit nullability; every column other than the primary key npi is conservatively documented as nullable (is_nullable: true) rather than asserting an unconfirmed NOT NULL. Entity-type-dependent columns are structurally empty for the other entity type: organization rows (entity_type_code 2) leave the individual name, credential, and gender columns blank, and individual rows (entity_type_code 1) leave provider_organization_name blank. Deactivated NPIs retain a row with most fields blanked; npi_deactivation_date is the marker.'
+  update_reason: null
+
+- table_name: other_name
+  description: Zero or more rows per NPI -- the NPPES Other Name supplemental public file, carrying additional organization names (doing-business-as, former legal business names) for organization providers whose record holds more than the one primary name.
+  notes: 'Grain is (npi, name occurrence); the file carries no sequence column, so no primary key is documented. Only organization providers (entity_type_code 2 on the main file) appear here.'
+  update_reason: null

@@ -1,0 +1,52 @@
+---
+name: cr_20260812v01_grant_catalog_ci_ro
+goal: Address code quality issues identified in code/apply_ddl/grant_catalog_ci_ro.sql to align with sql-development best-practices (re-review since cr_20260729v01, following the GitLab→GitHub migration that rewrote the header's CI references).
+created: 2026-08-12 13:50:26
+updated: 2026-08-12 14:53:18
+---
+
+## Implementation Plan
+
+1. [completed] Make a partially-failed run visible - `code/apply_ddl/grant_catalog_ci_ro.sql`
+   - 1.1. [minor] Line 44: Add `\set ON_ERROR_STOP on` before the first statement. Without it, `psql -f` reports a failed statement on stderr but keeps executing the remaining statements and still exits 0. That matters here precisely because the script's own preconditions (lines 33-39) describe the two realistic failure modes — the `metadata_db_ci_ro` role not yet created, or the script run before `apply_ddl.py` created the targets — and each produces an error on one statement while the rest proceed, leaving a half-applied privilege model behind a success exit code. Note the sibling scripts `grant_catalog_ci.sql` and `grant_ref_ro.sql` share this gap, so the same line belongs in each for consistency.
+        - Current: (no `ON_ERROR_STOP`; the file goes straight from the header comment to the `\if :{?schema}` default block)
+        - Expected: `-- Abort on the first failed statement: a missing role or a not-yet-created`<br>`-- target must not leave a half-applied privilege model behind a zero exit.`<br>`\set ON_ERROR_STOP on`
+        - Resolution: Implemented as specified — added the comment and `\set ON_ERROR_STOP on` immediately after the header block, before the `\if :{?schema}` defaults, so it covers every statement in the file. The same line was added to both siblings in this changeset (`grant_catalog_ci.sql` finding 1.1, `grant_ref_ro.sql` finding 3.1), each with the failure modes its own preconditions name, giving the three scripts one invocation contract.
+
+2. [completed] Correct the header's CI-dependency description - `code/apply_ddl/grant_catalog_ci_ro.sql`
+   - 2.1. [minor] Lines 9-11: The parenthetical attributes the `grant_ref_ro.sql` dependency to `validate_ref_data` alone, but `check_schema_in_sync` also depends on it: its second step runs `apply_ddl.py --config code/apply_ddl/config/apply_ddl_ref.toml --check` (`.github/workflows/pre_merge.yml` lines 183-191) as the same read-only role, reading the `reference` schema's independent `ddl_versions` ledger — a grant that only `grant_ref_ro.sql` provides. As written, a maintainer restoring privileges could conclude that the catalog grant scripts alone make `check_schema_in_sync` pass.
+        - Current: `-- (validate_catalog_data and check_schema_in_sync — see`<br>`-- .github/workflows/pre_merge.yml; validate_ref_data uses it too via`<br>`-- grant_ref_ro.sql).`
+        - Expected: `-- (validate_catalog_data and check_schema_in_sync — see`<br>`-- .github/workflows/pre_merge.yml; validate_ref_data uses it too, and`<br>`-- both it and check_schema_in_sync's ref-stream step read the`<br>`-- reference schema via grant_ref_ro.sql).`
+        - Resolution: Implemented as specified, with one accommodation — the replacement runs two lines longer than the original, so the remainder of the "Purpose" paragraph (through "...credential split the maintenance doc describes.") was re-wrapped to keep the comment block's fill width consistent; no wording changed there. The companion correction to the same CI relationship was made in `grant_ref_ro.sql` finding 2.1, which now names `check_schema_in_sync`'s ref-stream step as a step rather than a job.
+
+3. [completed] Optional comment enhancements - `code/apply_ddl/grant_catalog_ci_ro.sql`
+   - 3.1. [suggestion] Line 87: The `grant select on ddl_versions` statement is the only statement without a comment directly above it; the other three (lines 61-63, 66-69, 72-74) each carry their own. A one-line comment would also be the natural place to record why it is a separate statement from the main-table grant — `ddl_versions` is created by `apply_ddl.py`, not by the DDL migrations, so it is not part of the canonical migration table set.
+        - Current: `grant select on ddl_versions to metadata_db_ci_ro;`
+        - Expected: `-- Separate from the main-table grant: ddl_versions is created by`<br>`-- apply_ddl.py, not by the DDL migrations. Read by apply_ddl.py --check.`<br>`grant select on ddl_versions to metadata_db_ci_ro;`
+        - Resolution: Deferred — optional; the comment at lines 72-74 already covers the statement ("the sync check reads `ddl_versions`"), so the rationale is present, just not directly above the line.
+
+4. [completed] State the maintenance obligation the enumerated grant list creates - `code/apply_ddl/grant_catalog_ci_ro.sql`
+   - 4.1. [minor] Lines 19-24: The explicit 9-table list is deliberate (it is what excludes `_hstry` and `load_audit`), but it silently goes stale when a migration adds a main table — the new table simply never becomes readable by the PR jobs, surfacing as an opaque permission error inside `validate_catalog_data` rather than as a diff against this file. The header names the canonical source but not the resulting obligation, so the author of the migration has no reason to open this file at all. One clause converts an obscure CI failure into a checklist item.
+        - Current: `-- Privilege model (canonical table set defined in`<br>`-- code/apply_ddl/ddl_catalog/0001_initial_schema.sql): CONNECT on the database,`
+        - Expected: `-- Privilege model (canonical table set defined in`<br>`-- code/apply_ddl/ddl_catalog/0001_initial_schema.sql — a migration that adds a`<br>`-- main table must add it to the list below too): CONNECT on the database,`
+        - Resolution: Implemented as specified. The parallel clause in `grant_catalog_ci.sql` (finding 3.1) uses the same sentence shape with "BOTH grant lists below", since that file has a DML list and an `_hstry` mirror to keep in step.
+
+## Skills with No Issues
+
+1. sql-development / best-practices (privilege-model completeness): No issues found. The 9 tables granted SELECT (lines 76-84: `systems`, `data_sources`, `schemas`, `tables`, `columns`, `deployment_tables`, `table_relationships`, `column_mappings`, `concepts`) still match the 9 main `create table` statements in `code/apply_ddl/ddl_catalog/0001_initial_schema.sql` (lines 83, 105, 119, 140, 159, 227, 270, 311, 345), and `ddl_versions` gets SELECT (line 87). No `_hstry` mirror and no `load_audit` is referenced.
+2. sql-development / best-practices (privilege sufficiency for the consuming jobs): No issues found. `validate_catalog_data` runs `load_catalog_data.py --dry-run`, whose only DB access is `read_db_state` (one SELECT per main table — `code/load_catalog_data/db_io.py`); it writes nothing and reads neither `load_audit` nor the `_hstry` mirrors, so the SELECT-only set is sufficient. `check_schema_in_sync` runs `apply_ddl.py --check`, which skips the `ensure_schema` / `ensure_ddl_versions` bootstrap in check mode (`apply_ddl.py` lines 581-583, 612-616) and so never needs CREATE on the schema or database — it only reads `ddl_versions` (line 452), which is granted.
+3. sql-development / best-practices (least privilege): No issues found. SELECT only — no `all privileges`, no DML, no DDL, no sequence USAGE, no `_hstry`, no `load_audit`. Schema USAGE (line 64) and database CONNECT (line 70) are granted explicitly, each with a comment stating why it is required. This matches the write/read-only credential split documented in `.github/workflows/pre_merge.yml` (lines 32-53) and `readme/metadata-db-maintenance.md` (lines 304, 312).
+4. sql-development / best-practices (precondition accuracy): No issues found. The role-creation precondition (lines 34-36) matches the activation checklist in `readme/metadata-db-maintenance.md` line 533 ("create the LOGIN role, then run `grant_catalog_ci_ro.sql`"), and the run-after-`apply_ddl.py` precondition (lines 37-39) matches `ddl_versions` being created by `apply_ddl.py` rather than by a migration.
+5. sql-development / best-practices (default schema/database consistency): No issues found. `schema` defaults to `catalog` (line 50) and `database` to `metadata_db` (line 54), both matching `code/apply_ddl/config/apply_ddl_catalog.toml` (`database = "metadata_db"`, `schema = "catalog"`); the header invocation example (lines 29-31) uses the same values.
+6. sql-development / best-practices (parameterization): No issues found. `schema` / `database` default via `\if :{?...}` (lines 48-55), and `search_path` (line 59) plus every grant target resolve through `:"schema"` / `:"database"`, so targets bind deterministically regardless of the maintainer's ambient search_path.
+7. sql-development / best-practices (formatting — lowercase): No issues found. All SQL keywords and identifiers are lowercase; uppercase appears only in prose comments.
+8. sql-development / best-practices (formatting — 4-space indent): No issues found. The `grant select` continuation lines (one table per line, lines 76-84) and the `\set` bodies inside the `\if` blocks (lines 50, 54) use 4-space indent.
+9. sql-development / best-practices (formatting — line length ≤100 chars): No issues found. An `awk` length check reports no line exceeding 100 characters.
+10. sql-development / best-practices (comments — explain the why, above the line): No issues found beyond findings 2.1, 3.1, and 4.1. The header and inline comments sit above the code and explain intent, preconditions, the credential-split rationale, and the parameterization rationale; the workflow filenames and job names (lines 9-14) match the post-migration `.github/workflows/pre_merge.yml` and `post_merge.yml`.
+11. sql-development / best-practices (explicit column references, joins, group/order by): N/A - this is a DCL (GRANT) script with no SELECT, joins, or grouping.
+12. sql-development / best-practices (prefer union all): N/A - no set operations.
+13. sql-development / best-practices (NULL handling / explicit CAST): N/A - no data-manipulation expressions.
+14. sql-development / best-practices (CTEs over nested subqueries): N/A - no queries or CTEs.
+15. sql-development / best-practices (query/CTE block annotation): N/A - no queries or CTEs to annotate.
+16. sql-development / dbt: N/A - not a dbt project artifact.
+17. python-development (all core skills): N/A - target is a `.sql` file, not Python.

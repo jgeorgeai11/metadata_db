@@ -1,0 +1,34 @@
+# data_catalog/sources/ref/codes/columns/entity_type_cd.yaml
+# column_id = ref.codes.<table_name>.<column_name>. One shard per ref
+# table (by convention; stems stay freeform for the corpus loader).
+# The documented columns per table must equal the matching
+# data_ref/codes/<table>.csv header and the live DDL columns
+# (code/apply_ddl/ddl_ref/) — the ref loader's consistency gate enforces
+# it, so keep all three in sync in one PR.
+
+# --- entity_type_cd ---
+
+- table_name: entity_type_cd
+  column_name: code
+  data_type: text
+  is_nullable: false
+  is_primary_key: true
+  description: The entity type code value itself (1 or 2). Stored as text — codes, not quantities.
+  notes: null
+  update_reason: null
+
+- table_name: entity_type_cd
+  column_name: description
+  data_type: text
+  is_nullable: false
+  description: The code's description, as published in the NPPES Data Dissemination file layout.
+  notes: null
+  update_reason: null
+
+- table_name: entity_type_cd
+  column_name: notes
+  data_type: text
+  is_nullable: true
+  description: Freeform caveats about this code beyond the source description.
+  notes: null
+  update_reason: null

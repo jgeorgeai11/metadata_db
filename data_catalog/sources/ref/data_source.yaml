@@ -1,0 +1,12 @@
+# data_catalog/sources/ref/data_source.yaml
+# data_source_id='ref' (from path).
+# Hand-authored — the curated reference code sets the repo itself hosts.
+# The values live in data_ref/<schema>/*.csv (git-versioned, loaded by
+# code/load_ref_data/load_ref_data.py into the metadata_db instance's
+# `reference` schema); this corpus folder documents them like any other
+# data source.
+
+owner: maintainers
+description: Curated reference code sets hosted in the metadata_db Postgres instance's `reference` schema — small, hand-maintained tables that enumerate the value domain of coded columns across the cataloged sources. Each table is seeded from a git-versioned CSV under data_ref/; the values are OWNED here — this repo is their source of truth, not a mirror of an external system. The tables exist for context retrieval (a human or LLM resolving what a code means), not for runtime joins.
+notes: The one source where docs-vs-reality drift is mechanically prevented — the ref loader's consistency gate requires the documented columns here to equal the CSV header and the live DDL columns, so this documentation is guaranteed accurate. Consuming columns point here via `ref_table`; the pointer implies no join path and no co-deployment. See MAINTAINING.md for the ref architecture and the add-a-new-ref-table runbook.
+update_reason: null

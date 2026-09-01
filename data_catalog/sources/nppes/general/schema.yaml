@@ -1,0 +1,4 @@
+# data_catalog/sources/nppes/general/schema.yaml
+description: Schemaless flat-file source -- the NPPES public dissemination files have no internal schema concept, so 'general' holds their tables (the main NPI file and the Other Name supplemental file).
+notes: null
+update_reason: null

@@ -1,0 +1,394 @@
+# .github/workflows/pre_merge.yml — metadata_db pre-merge (PR) checks
+#
+# Captures the design from MAINTAINING.md:
+#   1. unit_tests: run the unit-test suite on every PR.
+#   2. validate_catalog_data: dry-run the loader so validation failures
+#      surface before review starts.
+#   3. check_schema_in_sync: refuse to merge if the DB is missing any
+#      migration already in the repo.
+#   4. validate_ref_data: validate the ref code-set CSVs on any PR that
+#      touches a leg of the ref consistency gate.
+# The post-merge jobs (real load + auto-revert) live in post_merge.yml.
+#
+# ── ACTIVATION GATE (see the job-level `if:` conditions) ──────────────
+# These workflows are DORMANT by design until the platform setup is
+# complete: every job is gated on the repository Actions variable
+# METADATA_DB_CI_ENABLED == "true" (Settings → Secrets and variables →
+# Actions → Variables). Until it is set, every job skips — no runner is
+# consumed and no missing-secret failure is produced. Until then,
+# maintainers run the scripts manually — see the "Manual workflow"
+# section of MAINTAINING.md. NOTE: a skipped job
+# satisfies a required status check, so branch protection's required
+# checks only bite once the variable is set.
+#
+# ── RUNNERS ───────────────────────────────────────────────────────────
+# The target is GitHub Enterprise Server (github.example.com), which has no
+# GitHub-hosted runners: every job needs a registered SELF-HOSTED runner
+# with Docker (for `container:`), a network path to Postgres, and access
+# to the Debian/PyPI mirrors the setup steps install from. Confirming
+# that infrastructure is part of the activation checklist in
+# MAINTAINING.md.
+#
+# Every job selects on the LABEL SET [self-hosted, linux, docker], not
+# bare `self-hosted`, which matches ANY registered self-hosted runner:
+# if the instance ever registers a second runner without Docker, a bare
+# selector lands jobs on it and they fail at container creation with an
+# error that never names the cause. The label set makes the requirement
+# enforceable rather than documentary — an unlabeled runner is simply
+# never assigned the job. The labels are applied at runner registration
+# (item 1 of the activation checklist); post_merge.yml selects on the
+# same set.
+#
+# ── TOOLCHAIN PINS ────────────────────────────────────────────────────
+# uv is installed BY VERSION, not latest. It is the one dependency
+# uv.lock cannot cover — it is what reads the lockfile — so an unpinned
+# `pip install uv` would let a breaking uv release take down all four PR
+# jobs (and all three post-merge jobs) at once, with no repo change to
+# point at. Bumping the pin is a reviewed one-line PR; keep it equal to
+# the version maintainers run locally, and equal in post_merge.yml.
+#
+# Every `uv run` passes --locked, which FAILS the job when uv.lock has
+# drifted from pyproject.toml instead of silently re-resolving and
+# rewriting the lockfile mid-job. Without it, a PR that edits
+# dependencies without refreshing the lock passes CI against an
+# environment that is not the committed one, and nothing flags the
+# stale lock.
+#
+# ── REQUIRED SECRETS — TWO ROLES, SPLIT BY PRIVILEGE ──────────────────
+# The credential model splits the DB role by trust boundary so
+# unreviewed branch code never holds a write credential:
+#
+#   Read-only set — POSTGRES_RO_HOST / POSTGRES_RO_PORT /
+#   POSTGRES_RO_USER / POSTGRES_RO_PASSWORD — repository Actions secrets
+#     for the metadata_db_ci_ro role (SELECT on main tables +
+#     ddl_versions; no DML, no _hstry). Used by the PR jobs in THIS
+#     workflow, which run unreviewed branch code. Read-only exposure to
+#     branch code is the accepted residual — the worst an attacker gains
+#     is SELECT on catalog metadata.
+#
+#   Write set — POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER /
+#   POSTGRES_PASSWORD — credentials for the metadata_db_ci role, plus
+#     CLEANUP_BOT_TOKEN for the cleanup bot. Stored in the
+#     `metadata-db-write` deployment environment, restricted to the
+#     `main` branch, and referenced only by post_merge.yml. Plain
+#     repository secrets would be readable by a PR that edits a workflow
+#     file (pull_request runs from same-repo branches DO receive repo
+#     secrets — only fork PRs are excluded), so the environment
+#     restriction is what confines the write credential to reviewed,
+#     on-main code — the GitHub analogue of GitLab's protected variables.
+#
+# ── INVARIANT ─────────────────────────────────────────────────────────
+# No DDL ever runs from CI. apply_ddl.py is maintainer-run. Neither the
+# metadata_db_ci nor the metadata_db_ci_ro role has any DDL privilege.
+
+name: pre_merge
+
+on:
+  pull_request:
+
+# No job here uses the workflow token, but every job here runs
+# UNREVIEWED branch code, and without this block each would inherit the
+# repository/organization default GITHUB_TOKEN scope (historically
+# read-write) — readable by pytest, the loader dry-run, and every other
+# step. Declaring it read-only is what makes the trust boundary above
+# true of the WORKFLOW token as well, not just the Postgres role.
+# post_merge.yml declares the same.
+permissions:
+  contents: read
+
+# One self-hosted runner serves the whole repo (see RUNNERS above), so
+# each push to a busy PR branch would otherwise stack another four jobs
+# behind the previous push's four. A superseded PR run carries no
+# information — the newer run checks the same PR against the same base,
+# only later — so cancelling it is safe. post_merge.yml serializes its
+# runs too, but with cancel-in-progress: false, because a post-merge run
+# is NOT disposable.
+concurrency:
+  group: pre_merge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Run the unit-test suite on every PR. Integration tests stay
+  # excluded — they are env-gated by METADATA_DB_INTEGRATION and skip
+  # themselves unless it is set. No DB access needed.
+  # ─────────────────────────────────────────────────────────────────────
+  unit_tests:
+    if: vars.METADATA_DB_CI_ENABLED == 'true'
+    runs-on: [self-hosted, linux, docker]   # labels applied at runner registration
+    # Every job in both workflows carries a timeout: on ONE shared
+    # runner, a job hung on an unreachable Postgres or a wedged apt
+    # mirror would otherwise hold it for GitHub's 360-minute default,
+    # blocking every other PR and every post-merge load meanwhile. Half
+    # an hour is far above any real run here (the suite and the loader
+    # are minutes) and far below the default.
+    timeout-minutes: 30
+    # python:3.14-slim matches the project's `requires-python >= 3.14` /
+    # `.python-version`, so uv never has to download a managed
+    # interpreter per job (which a restricted runner may not even be
+    # able to do). pip install uv adds ~5s per job and is fully portable
+    # across runners.
+    container:
+      image: python:3.14-slim
+    steps:
+      # The slim image ships without git; actions/checkout without git
+      # silently falls back to an API tarball download, which yields no
+      # .git directory — and several jobs (and the loader's SHA
+      # fallback) need a real repository. Installed uniformly in every
+      # job so no job depends on which checkout mode it happened to get.
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@v4
+        with:
+          # No job in this workflow pushes anything, so the checkout
+          # default (persist-credentials: true) would write an
+          # http.extraheader bearing the GITHUB_TOKEN into .git/config
+          # of a workspace that then executes unreviewed branch code —
+          # pure exposure. Same discipline code/revert_merge/git_ops.py
+          # keeps for its own token: nothing token-bearing is ever
+          # persisted in .git/config, so on a reused runner workspace
+          # the credential cannot outlive the job. Every checkout below
+          # sets it for the same reason.
+          persist-credentials: false
+      - name: Install uv
+        run: pip install --no-cache-dir "uv==0.11.1"
+      - name: Run unit tests
+        run: uv run --locked pytest code/
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Dry-run the loader on every PR so validation failures surface
+  # before review starts. Reads from the DB (SELECT on main tables —
+  # required for the update_reason discipline check); no writes. Runs
+  # unreviewed branch code, so it maps POSTGRES_* from the read-only
+  # POSTGRES_RO_* secrets (metadata_db_ci_ro) — the write credential is
+  # never exposed to a PR run.
+  # ─────────────────────────────────────────────────────────────────────
+  validate_catalog_data:
+    if: vars.METADATA_DB_CI_ENABLED == 'true'
+    runs-on: [self-hosted, linux, docker]   # labels applied at runner registration
+    timeout-minutes: 30
+    container:
+      image: python:3.14-slim
+    env:
+      POSTGRES_HOST: ${{ secrets.POSTGRES_RO_HOST }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_RO_PORT }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_RO_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_RO_PASSWORD }}
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install uv
+        run: pip install --no-cache-dir "uv==0.11.1"
+      - name: Dry-run the loader
+        run: >
+          uv run --locked code/load_catalog_data/load_catalog_data.py
+          --config code/load_catalog_data/config/load_catalog_data.toml
+          --dry-run
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Refuse merge if the DB is missing any migration already in the
+  # repo. Forces the ordering: migration PR merges → maintainer applies
+  # it → subsequent PRs become mergeable again.
+  #
+  # Exception for the migration PR itself: a PR that ADDS a new
+  # migration file cannot satisfy a strict check (the file is in the
+  # repo but not yet applied — it is only applied post-merge, by a
+  # maintainer). So this job computes the migration files the PR newly
+  # adds and passes them via --allow-pending, exempting exactly those
+  # files while staying strict about every other pending migration.
+  # On a pull_request event the checkout is the ephemeral PR merge
+  # commit, so `HEAD^1` is the current base-branch tip and
+  # `git diff HEAD^1 HEAD` is exactly the PR's effective change set;
+  # `fetch-depth: 0` gives the full history that diff needs.
+  # Read-only role, like validate_catalog_data (unreviewed branch code).
+  # ─────────────────────────────────────────────────────────────────────
+  check_schema_in_sync:
+    if: vars.METADATA_DB_CI_ENABLED == 'true'
+    runs-on: [self-hosted, linux, docker]   # labels applied at runner registration
+    timeout-minutes: 30
+    container:
+      image: python:3.14-slim
+    env:
+      POSTGRES_HOST: ${{ secrets.POSTGRES_RO_HOST }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_RO_PORT }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_RO_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_RO_PASSWORD }}
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv
+        run: pip install --no-cache-dir "uv==0.11.1"
+      # Two migration streams, one check each: the catalog (`catalog`,
+      # code/apply_ddl/ddl_catalog/) and the ref stream's physical
+      # `reference` schema (code/apply_ddl/ddl_ref/) keep INDEPENDENT
+      # ddl_versions ledgers — apply_ddl auto-creates one per schema —
+      # so each config's --check only knows its own stream and both
+      # must run.
+      #
+      # The --allow-pending computation is STREAM-AWARE: migration files
+      # this PR newly adds under code/apply_ddl/ddl_catalog/ exempt only
+      # the catalog check, and files under code/apply_ddl/ddl_ref/ only
+      # the ref check — otherwise a ref-migration PR could never pass
+      # its own checks (its new file is only applied post-merge, by a
+      # maintainer). --diff-filter=A restricts to added files, and
+      # --no-renames keeps a renamed migration visible as one: git's
+      # rename detection (default on since 2.9) would report it as R,
+      # which --diff-filter=A silently drops, so a PR that renames a
+      # not-yet-applied migration would compute no --allow-pending for
+      # it and could never pass its own check. (validate_ref_data's
+      # exemption diffs set the flag for the same reason.)
+      # Word-splitting the accumulated strings is intended (migration
+      # filenames are lowercase [a-z0-9_-].sql, no spaces).
+      - name: Check catalog migration stream
+        run: |
+          ALLOW=""
+          for f in $(git diff --name-only --no-renames --diff-filter=A \
+              HEAD^1 HEAD -- code/apply_ddl/ddl_catalog/); do
+            ALLOW="$ALLOW --allow-pending $(basename "$f")"
+          done
+          uv run --locked code/apply_ddl/apply_ddl.py \
+            --config code/apply_ddl/config/apply_ddl_catalog.toml --check $ALLOW
+      - name: Check ref migration stream
+        run: |
+          ALLOW_REF=""
+          for f in $(git diff --name-only --no-renames --diff-filter=A \
+              HEAD^1 HEAD -- code/apply_ddl/ddl_ref/); do
+            ALLOW_REF="$ALLOW_REF --allow-pending $(basename "$f")"
+          done
+          uv run --locked code/apply_ddl/apply_ddl.py \
+            --config code/apply_ddl/config/apply_ddl_ref.toml --check $ALLOW_REF
+      # A ref-data freshness line (`load_ref_data.py --check`) is
+      # deliberately NOT wired here: a PR that edits a ref CSV would
+      # always see the DB "stale" against its own change (ref loading is
+      # maintainer-manual and post-merge), deadlocking the PR's own
+      # checks with no --allow-pending analogue. Freshness is surfaced
+      # by maintainers running --check manually (see the maintenance
+      # doc's ref section).
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Validate the ref code-set CSVs on any PR that touches ANY leg of
+  # the ref consistency gate — the values (data_ref/**), their catalog
+  # docs (data_catalog/sources/ref/**), or the ref DDL
+  # (code/apply_ddl/ddl_ref/**) — so a malformed CSV or a docs/DDL edit
+  # that breaks docs == CSV == DDL fails pre-merge exactly like
+  # malformed corpus YAML. load_ref_data.py --dry-run runs every
+  # validation (filename resolves to a ref table, header == live
+  # columns, PK uniqueness, values parse, row-count guardrail,
+  # docs-vs-CSV consistency gate, bidirectional drift) and stops before
+  # the truncate — read-only, so it runs as the RO role like the other
+  # PR jobs.
+  #
+  # Path gating happens in the change-detection STEP below, not in a
+  # trigger-level `paths:` filter: GitHub evaluates `paths:` at the
+  # workflow trigger, and the jobs in this workflow gate on different
+  # paths, so each job carries its own gate instead.
+  #
+  # PR escape hatches — the full, symmetric family. A PR that ADDS,
+  # DROPS, or RESHAPES a ref table cannot satisfy the strict live-DB
+  # checks (its ref migration is only applied post-merge, by a
+  # maintainer). Like check_schema_in_sync's --allow-pending, the job
+  # computes every exemption from the PR's OWN diff (authors cannot
+  # exempt arbitrary tables), one flag per diff class:
+  #   * added CSVs    (--diff-filter=A) -> --allow-missing-table  (the
+  #     new table validates against the documented shape);
+  #   * deleted CSVs  (--diff-filter=D) -> --allow-dropped-table  (the
+  #     retired table's DB-table-without-CSV drift downgrades to a
+  #     warning);
+  #   * modified CSVs (--diff-filter=M) -> --allow-reshaped-table, but
+  #     ONLY when the PR also touches code/apply_ddl/ddl_ref/ (a
+  #     value-only PR gets no shape exemptions and stays fully strict).
+  #     Known over-breadth, accepted: when ddl_ref/ is touched, ALL
+  #     modified CSVs in the PR get shape exemptions — including
+  #     value-only edits to unrelated tables, which then validate at
+  #     docs-shape strictness instead of live.
+  # Every EXEMPTION diff runs with --no-renames (the change-detection
+  # gate described above needs none — it only tests its diff for a
+  # non-empty result, which a rename produces either way): git's rename
+  # detection (default on since 2.9) would report a renamed CSV as R,
+  # which --diff-filter=A/D silently drops — with --no-renames a rename
+  # appears as an add plus a delete, so a renamed table gets both its
+  # exemptions. Stems come from *.csv basenames only, anywhere under
+  # data_ref/ (schema folders are the norm); non-CSV paths produce no
+  # flags. `fetch-depth: 0` gives the full history the diffs need.
+  # Word-splitting the accumulated string is intended (CSV stems are
+  # lowercase [a-z0-9_], no spaces).
+  #
+  # Note ref LOADING stays maintainer-manual: a data_ref/** merge
+  # deliberately triggers no post-merge load job (mirroring the
+  # manual-DDL stance — values change rarely and deserve chosen
+  # timing); `load_ref_data.py --check` surfaces a forgotten load.
+  # ─────────────────────────────────────────────────────────────────────
+  validate_ref_data:
+    if: vars.METADATA_DB_CI_ENABLED == 'true'
+    runs-on: [self-hosted, linux, docker]   # labels applied at runner registration
+    timeout-minutes: 30
+    container:
+      image: python:3.14-slim
+    env:
+      POSTGRES_HOST: ${{ secrets.POSTGRES_RO_HOST }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_RO_PORT }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_RO_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_RO_PASSWORD }}
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The diff is captured into a variable rather than piped into
+      # `grep -q`: a pipeline yields grep's status, so a git failure
+      # (missing parent, corrupt or shallow-grafted checkout) would be
+      # indistinguishable from "no ref path changed" and would write
+      # run=false — the validation would silently not run and the PR
+      # would go green. Assigning the command substitution lets the
+      # step's default `bash -e` abort on a git failure instead, so the
+      # gate fails CLOSED. post_merge.yml's gates do the same.
+      - name: Detect ref-gate changes
+        id: changes
+        run: |
+          CHANGED="$(git diff --name-only HEAD^1 HEAD -- \
+              data_ref/ data_catalog/sources/ref/ code/apply_ddl/ddl_ref/)"
+          if [ -n "$CHANGED" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install uv
+        if: steps.changes.outputs.run == 'true'
+        run: pip install --no-cache-dir "uv==0.11.1"
+      - name: Dry-run the ref loader
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          ALLOW=""
+          for f in $(git diff --name-only --no-renames --diff-filter=A \
+              HEAD^1 HEAD -- data_ref/); do
+            case "$f" in
+              *.csv) ALLOW="$ALLOW --allow-missing-table $(basename "$f" .csv)" ;;
+            esac
+          done
+          for f in $(git diff --name-only --no-renames --diff-filter=D \
+              HEAD^1 HEAD -- data_ref/); do
+            case "$f" in
+              *.csv) ALLOW="$ALLOW --allow-dropped-table $(basename "$f" .csv)" ;;
+            esac
+          done
+          if [ -n "$(git diff --name-only --no-renames \
+              HEAD^1 HEAD -- code/apply_ddl/ddl_ref/)" ]; then
+            for f in $(git diff --name-only --no-renames --diff-filter=M \
+                HEAD^1 HEAD -- data_ref/); do
+              case "$f" in
+                *.csv) ALLOW="$ALLOW --allow-reshaped-table $(basename "$f" .csv)" ;;
+              esac
+            done
+          fi
+          uv run --locked code/load_ref_data/load_ref_data.py \
+            --config code/load_ref_data/config/load_ref_data.toml \
+            --dry-run $ALLOW

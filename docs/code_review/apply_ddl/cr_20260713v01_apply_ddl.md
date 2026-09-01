@@ -1,0 +1,41 @@
+---
+name: cr_20260713v01_apply_ddl
+goal: Address code quality issues identified in code/apply_ddl/apply_ddl.py to align with python-development and sql-development skills.
+created: 2026-07-13 22:33:12
+updated: 2026-07-14 00:00:00
+---
+
+## Implementation Plan
+
+1. [completed] Logging run-boundary symmetry in `--check` mode — `code/apply_ddl/apply_ddl.py`
+   - 1.1. [completed] Line 354: When `--check` finds pending migrations, `run` calls `sys.exit(1)`, which raises `SystemExit`. In `main` the `run(...)` call (line 418) is wrapped in handlers for `KeyError`, `(FileNotFoundError, ValueError, RuntimeError)`, and `psycopg2.Error` only — none catch `SystemExit`, so it propagates straight out and the closing `logger.info("=" * 60)` (line 420) is never reached. The opening separator (line 401) is therefore left unclosed on this exit path. The prior review (item 2) fixed exactly this asymmetry for the config-not-found and TOML-decode paths; the check-mode-pending exit is the remaining case. Logging skill guideline 7 calls for separators marking both the start and end of a run.
+        - Current:
+          ```python
+          if check_only:
+              if pending:
+                  pending_versions = [v for v, _ in pending]
+                  logger.error(
+                      f"Pending migrations (not yet applied): {pending_versions}"
+                  )
+                  sys.exit(1)
+          ```
+        - Expected: emit the closing separator before exiting on this path (e.g. `logger.info("=" * 60)` immediately before `sys.exit(1)`), or restructure so the check-mode-pending result reaches `main`'s single closing-separator point rather than exiting mid-`run`.
+        - Resolution: Implemented via the second (restructure) option, deviating from the literal `logger.info` before `sys.exit(1)` in `run`. Added an `except SystemExit:` clause to `main`'s `try` around `run(...)` that logs the closing `logger.info("=" * 60)` and then bare-`raise`s to preserve the exit code. This keeps run-boundary separators owned solely by `main` (no separator logging inside `run`), makes the check-mode-pending exit symmetric with the other exit paths, and preserves `run`'s documented `SystemExit` contract. The `except SystemExit` clause does not interfere with the sibling `except` arms' own `sys.exit(1)` calls (an exception raised in an `except` clause is not caught by another clause of the same `try`), so no double separator is logged. Verified by the new `test_main_check_pending_logs_closing_separator`, which asserts two separators and no `SUCCESS` on this path.
+
+2. [completed] `--check` "No writes" claim contradicts unconditional table creation — `code/apply_ddl/apply_ddl.py`
+   - 2.1. [completed] Lines 326, 348, 386-388, 298-299: `run` calls `ensure_ddl_versions(conn)` unconditionally (line 326) before the `check_only` branch (line 348). `ensure_ddl_versions` runs `create table if not exists ddl_versions (...)` and then `conn.commit()` (lines 192-201) — a write. On a fresh database, `--check` therefore creates and commits the tracking table, contradicting the `--check` help text "Read-only mode ... No writes." (lines 386-388) and `run`'s docstring "only reports whether the DB is in sync; no writes." (lines 298-299). Beyond the documentation mismatch, a CI check job whose role lacks CREATE privilege would fail on a fresh DB. Against an existing DB the `if not exists` makes it an effective no-op, so this is a latent edge case rather than an active failure in the normal CI path.
+        - Current: `ensure_ddl_versions(conn)` is called for both apply and `--check` flows, with the "No writes" claim documented for `--check`.
+        - Expected: reconcile behavior and documentation — either soften the "No writes" wording to acknowledge the idempotent `create table if not exists` bootstrap, or skip/guard the create-and-commit in `check_only` mode (handling the "table absent" case as "not in sync" rather than erroring).
+        - Resolution: Implemented the skip/guard option (making the "No writes" claim literally true, so the `--check` help text and `run` docstring were intentionally left unchanged). Added a read-only `ddl_versions_exists(conn)` helper that runs a single `select to_regclass('ddl_versions')` (no DDL, no commit). `run` now branches: in `check_only` mode it skips `ensure_ddl_versions` entirely, calling `applied_migrations` only when the table exists and otherwise treating `applied_map` as empty (`{}`) — so a fresh DB reports every repo migration as pending and exits non-zero rather than creating/committing the tracking table or erroring; apply mode still calls `ensure_ddl_versions` to bootstrap the table. This also removes the latent failure where a check-only role lacking CREATE privilege would error on a fresh DB. Verified by new tests: `test_ddl_versions_exists_true_when_present`/`_false_when_absent` (helper is read-only, no commit), `test_run_check_mode_does_not_write` (ensure_ddl_versions not called in check mode), `test_run_check_mode_absent_table_treats_all_pending` (fresh DB -> all pending, SystemExit 1, no write), and `test_run_apply_mode_ensures_table` (apply mode still bootstraps).
+
+## Skills with No Issues
+
+1. Type Hints: No issues found. Every function is fully annotated with modern syntax — `compute_checksum(path: Path) -> str`, `connection_kwargs(database: str) -> dict[str, str]`, `list_repo_migrations(ddl_dir: Path) -> list[tuple[str, Path]]`, `applied_migrations(...) -> dict[str, str]`, `verify_checksums(repo_by_version: dict[str, Path], applied: dict[str, str]) -> None`, `run(config: dict[str, Any], check_only: bool, create_db: bool) -> None`, `main() -> None`. `psycopg2.extensions.connection` is used consistently.
+2. Docstrings: No issues found. Module docstring plus Google-style docstrings on every function; Args/Returns/Raises are present where applicable and accurate. `run`'s Raises documents the append-only/checksum `RuntimeError` and the `--check`-mode `SystemExit`.
+3. Comments: No issues found. Comments explain "why" — numeric-vs-lexical sort rationale (lines 163-164), dedup-on-integer rationale (lines 167-169), the append-only invariant (lines 330-333), the immutability invariant and why it runs in both modes (lines 341-343), and why `CREATE DATABASE` needs the maintenance DB and autocommit (lines 102-104, 118).
+4. Logging: See Implementation Plan item 1. Otherwise clean — uses `logconfig`, no `print()`, f-strings throughout, appropriate DEBUG/INFO/ERROR levels, opening/closing separators on the non-check exit paths, no redundant "Entering/Exiting" messages.
+5. Exception Handling: No issues found. Specific exceptions only; `apply_one` catches `psycopg2.Error`, rolls back, logs, and bare-`raise`s to preserve type (lines 285-288); `create_database_if_absent` uses try/finally to guarantee `conn.close()`; `main` dispatches on `KeyError`, `(FileNotFoundError, ValueError, RuntimeError)`, and `psycopg2.Error` with contextful messages; `RuntimeError` is raised (not wrapped in generic `Exception`) for the missing-env-var, append-only, and immutability violations.
+6. Executable Scripts: No issues found. `main()` with `if __name__ == "__main__"` guard, `--config` required, logging deferred until after `parse_args`, config-existence and TOML-decode failures handled. The additional `--check`/`--create-db` mode flags were reviewed and accepted as a defensible CI/maintainer deviation in the prior review (item 4).
+7. Data Validation: N/A — this is a DDL migration applier, not a `data_val_` output-validation script; the `data_val_` naming / `data_validation/` directory convention does not apply.
+8. Unit Tests: N/A for this source file's content. Tests exist at `code/apply_ddl/unit_tests/test_apply_ddl.py` with `code/apply_ddl/unit_tests/conftest.py`; they were not run as part of this review-only pass.
+9. SQL (best-practices): No issues found. Embedded SQL is now lowercase throughout (lines 122, 128, 192-200, 216, 280-282), uses explicit columns (`select version, checksum`, no `select *`), parameterized `%s` placeholders (lines 122, 280-282), and `sql.Identifier` for the dynamic database name in `create database` (line 128) preventing injection. The prior review's lowercase finding (item 1) is resolved.

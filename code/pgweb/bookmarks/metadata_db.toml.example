@@ -1,0 +1,14 @@
+# pgweb connection bookmark for metadata_db — the entry viewers pick in the
+# UI's connection list (pgweb runs with --bookmarks-only, so bookmarks are the
+# only way to connect).
+#
+# Copy to metadata_db.toml (gitignored) and fill in the real pgweb_ro
+# password — the secret set when the role was provisioned out-of-band (see
+# code/apply_ddl/grants/pgweb_ro.sql). The real file stays local: this repo
+# never commits credentials.
+host = "localhost"
+port = 5432
+user = "pgweb_ro"
+password = "<pgweb_ro password>"
+database = "metadata_db"
+ssl = "disable"

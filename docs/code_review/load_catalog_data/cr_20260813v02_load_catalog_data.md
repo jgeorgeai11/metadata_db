@@ -1,0 +1,48 @@
+---
+name: cr_20260813v02_load_catalog_data
+goal: Address code quality issues identified in code/load_catalog_data/load_catalog_data.py to align with python-development and sql-development skills; re-review since cr_20260813v01 covering the rule-20/21 to CONTRIBUTING.md doc rewrite and the `validate_update_reason(diff)` signature change, done as a group with unit_tests/test_load_catalog_data.py.
+created: 2026-08-13 11:47:17
+updated: 2026-08-13 12:23:39
+---
+
+## Implementation Plan
+
+1. [completed] Config-error handling parity across config fields - `code/load_catalog_data/load_catalog_data.py`
+   - 1.1. [minor] Lines 232-234 and 391: the three required config fields are consumed without a type check, so a mistyped TOML value escapes as an unhandled `TypeError` traceback instead of the clean exit-1 every other config error gets. `data_root = 5` makes `Path(config["data_root"])` raise `TypeError: argument should be a str or an os.PathLike object ... not 'int'` (verified), and `main`'s arms catch only `KeyError`, `ValidationError`, `FileNotFoundError`, `ValueError`, `RuntimeError`, and `psycopg2.Error`. This is exactly the failure mode `_validate_mass_delete_knobs` was added to prevent for the guard knobs (its docstring, lines 108-111: "would otherwise escape as an unhandled `TypeError` ... so a bad value fails fast with a clear config error"), so the two halves of the same config are handled inconsistently (exception-handling guidelines 2 and 4).
+        - Current: `except (FileNotFoundError, ValueError, RuntimeError) as e:`
+        - Expected: `except (FileNotFoundError, TypeError, ValueError, RuntimeError) as e:`
+        - Resolution: Implemented as specified — `main`'s arm now catches `TypeError`, so a mistyped required field exits 1 with a logged message like every other config error instead of an unhandled traceback. Two accommodations: `run`'s `Raises:` list gained a `TypeError` entry (a raised type the docstring otherwise did not name), and the sibling suite gained `test_main_non_string_data_root_exits_1` (`data_root = 5`) so the newly handled path is pinned rather than merely reachable; it asserts the exit code plus that an ERROR record was logged, not the CPython wording of the message.
+
+2. [completed] Docstring precision and standing style carryovers - `code/load_catalog_data/load_catalog_data.py`
+   - 2.1. [suggestion] Lines 208-210: `run`'s `Raises:` list names `MassDeleteError` unqualified, but that name is not imported into this module (only `check_mass_delete` is), so a reader cannot resolve it from this file the way every other listed type resolves.
+        - Current: `MassDeleteError: If the diff would delete more than the\n            configured share of current DB rows (subclass of\n            RuntimeError).`
+        - Expected: `corpus_diff.MassDeleteError: If the diff would delete more\n            than the configured share of current DB rows (subclass of\n            RuntimeError).`
+        - Resolution: Deferred — cosmetic: the same docstring line already names `corpus_diff.check_mass_delete` two entries earlier in step 7, and the module is named in the module-level step list, so the raising module is discoverable as written.
+   - 2.2. [suggestion] Lines 103-105: `_validate_mass_delete_knobs` annotates its unvalidated inputs as `Any`; `object` would be the more precise static type for "anything TOML can produce" (type-hints guideline 3).
+        - Current: `def _validate_mass_delete_knobs(\n    fraction: Any, min_count: Any\n) -> tuple[float, int]:`
+        - Expected: `def _validate_mass_delete_knobs(\n    fraction: object, min_count: object\n) -> tuple[float, int]:`
+        - Resolution: Deferred — carryover of cr_20260813v01 finding 1.1, unchanged: `Any` is deliberate because validating the raw values' types is the function's whole purpose, the docstring documents the expected types, and the swap changes no runtime or checking outcome.
+   - 2.3. [suggestion] Lines 310-311: `run`'s cleanup-only `finally: conn.close()` emits no log line (exception-handling guideline 5 lists `finally` among the stages that should log).
+        - Current: `finally:\n        conn.close()`
+        - Expected: `finally:\n        conn.close()\n        logger.debug(f"Closed connection to {database} (schema {schema})")`
+        - Resolution: Deferred — carryover of cr_20260813v01 finding 1.2, unchanged: every terminal outcome (the dry-run summary, `apply_diff`'s own commit/failure logging, `main`'s SUCCESS/error arms) already logs before the block runs, so a close-time DEBUG line is noise rather than context.
+   - 2.4. [suggestion] Line 269: the one embedded SQL statement uses an uppercase keyword, `"SELECT pg_try_advisory_xact_lock(%s, %s)"` (sql-development keyword casing).
+        - Current: `"SELECT pg_try_advisory_xact_lock(%s, %s)",`
+        - Expected: `"select pg_try_advisory_xact_lock(%s, %s)",`
+        - Resolution: Deferred — carryover of cr_20260813v01 finding 1.3 and the standing decision in cr_20260812v01_db_io finding 4.1: casing inside Python string literals is style-only, and this file's uppercase form matches `db_io.py`'s nine uppercase `_SELECT_*` statements, so changing this one line alone would create the inconsistency the convention avoids.
+   - 2.5. [suggestion] Lines 194-196 and 225-230: `run` documents that the `--allow-mass-delete` env gate applies "in both modes so a dry-run previews exactly what a real run would do", but that dry-run half is unpinned by the sibling suite, while the twin `--reset-hstry` gate has two dedicated dry-run tests (grouped-review consistency check — two conventions for one documented behavior).
+        - Current: `if allow_mass_delete:\n        if os.environ.get(MASS_DELETE_ENV_VAR) != "1":` (documented as both-modes; only the real-run path is tested)
+        - Expected: no change on this side — the loader's both-modes gate is correct; the sibling suite should pin it as it already pins `--reset-hstry`
+        - Resolution: Deferred — the divergence is actionable only in `code/load_catalog_data/unit_tests/test_load_catalog_data.py`, where it is tracked as the [minor] finding 1.1 of `cr_20260813v02_test_load_catalog_data.md`; this file's behavior is the one to keep.
+
+## Skills with No Issues
+
+1. Type Hints skill: Issues limited to the deferred suggestion 2.2 — every function is fully annotated with modern, specific syntax (`dict[str, Any]` for the parsed TOML, `tuple[float, int]`, `-> None`, `-> int`), and the flag parameters are plain `bool`.
+2. Docstrings skill: Issues limited to the deferred suggestion 2.1 — the module docstring documents the three modes, both env-var gates, and connection sourcing; `run`'s Google-style docstring enumerates all nine steps and a complete eight-entry `Raises` list, re-verified against collaborators after this round's changes (`discover_yaml_files` raises `FileNotFoundError` for a missing `sources/`, `validate_corpus` returns the expression memo consumed at lines 249-253, `compute_target_tables_referenced` accepts the `None` a dropped mapping memoizes, `check_mass_delete(diff, db_state, fraction, min_count)` matches the call at lines 298-303).
+3. Comments skill: No issues found. The doc-reference rewrite is accurate: `run`'s steps 6-7 and the inline comment at lines 287-291 cite "CONTRIBUTING.md wave 3", and CONTRIBUTING.md's "Wave 3 — diff-time" section does list exactly `update_reason` discipline then the mass-delete guard, matching the `validate_update_reason`-before-`check_mass_delete` call order at lines 291-303. The `MAINTAINING.md` loader-contract pointer (lines 5-6) resolves to that file's "The loader script" section; `parents[2]` (line 43) is the repo root, so `code/lib` resolves; the two-key advisory-lock comments (lines 69-74, 259-265) match the `pg_try_advisory_xact_lock(%s, %s)` call.
+4. Logging skill: No issues found. `logconfig` throughout with no `print()`, f-strings in every call, `setup_logging` deferred until after `parse_args`, `"=" * 60` separators at run start, on SUCCESS, and on every post-dispatch error arm, and level choices fit the table (DEBUG connect line, INFO dry-run summary, WARNING for the bypassed guard, ERROR on failures).
+5. Exception Handling skill: Issues found — see task 1.1 (unhandled `TypeError` from mistyped config fields) and the deferred suggestion 2.3; otherwise no bare `except`, `main` dispatches specific types with contextful messages, `LoadInProgressError`/`MassDeleteError` reach the `RuntimeError` arm via subclassing, and the connection `finally` guarantees the transaction-scoped lock is released in every mode.
+6. Executable Scripts skill: No issues found. `main()` with a `# pragma: no cover` `__main__` guard, required `--config` with the TOML shipped at `code/load_catalog_data/config/load_catalog_data.toml` (whose `data_root`/`database`/`schema`/knob keys match what `run` reads), logging set up after `parse_args`, and config-existence/TOML-decode failures handled before dispatch. The three mode flags remain the CI/maintainer deviation from the single-`--config` rule accepted in cr_20260729v01/cr_20260730v01.
+7. SQL skill (sql-development): Issues limited to the deferred casing suggestion 2.4 — the single embedded statement is parameterized via `%s` with no interpolated identifiers.
+8. Data Validation skill: N/A — corpus validation is this loader's business logic, not a `data_val_` output-validation script, so the naming/directory convention does not apply.
+9. Unit Tests skill: N/A for this source file's content — the suite lives at `code/load_catalog_data/unit_tests/test_load_catalog_data.py` (38 tests passing, 100% statement coverage of this module) and is reviewed in `cr_20260813v02_test_load_catalog_data.md`.

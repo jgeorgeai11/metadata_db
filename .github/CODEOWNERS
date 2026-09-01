@@ -1,0 +1,28 @@
+# CODEOWNERS — automatic reviewer routing for the metadata_db repo.
+#
+# GitHub parses this file on every PR: when a changed path matches a
+# rule, the listed owner(s) are auto-requested as reviewers. The LAST
+# matching rule wins.
+#
+# Interim state: one catch-all rule owned by an individual, so every
+# path in the repo routes to a real, requestable reviewer. The
+# per-source team routing (repo plumbing, corpus root and venue
+# registry, one rule per data-source steward folder, dual-owner rules
+# for the cross-dataset mappings) is designed but deliberately not
+# committed here yet: it depends on @Warehouse org team slugs that do not
+# exist, and an unknown handle makes its rule silently inert — which
+# would route those paths to nobody rather than falling back to the
+# catch-all. The routing principles (which tier owns what, rule
+# ordering, the dual-owner mappings rules) are recorded under
+# "Ownership routing" in MAINTAINING.md; write the per-source rules
+# here from them once the teams are provisioned and staffed.
+#
+# Enforcement is a branch-protection choice: with "Require review from
+# Code Owners" enabled on `main`, a PR is unmergeable until an owner of
+# every matched rule approves. Handles must be individual usernames or
+# org teams with write access to the repo.
+
+# ----------------------------------------------------------------------
+# Catch-all — every path, until per-source routing lands.
+# ----------------------------------------------------------------------
+*                                                   @jgeorgeai11

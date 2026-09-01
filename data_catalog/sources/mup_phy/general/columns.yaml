@@ -1,0 +1,91 @@
+# data_catalog/sources/mup_phy/general/columns.yaml
+# column_id = mup_phy.general.provider_summary.<column_name>.
+
+- table_name: provider_summary
+  column_name: rndrng_npi
+  data_type: char(10)
+  is_nullable: false
+  is_primary_key: true
+  description: The rendering provider's NPI (National Provider Identifier) -- the provider who performed the aggregated services. Joins to the NPPES registry on nppes.general.npi.npi.
+  notes: Primary key together with the file's data year; the demo corpus documents a single-year extract, so the NPI alone is recorded as the key.
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: rndrng_prvdr_last_org_name
+  data_type: char(70)
+  is_nullable: true
+  description: The rendering provider's last name (individual providers) or organization name (organization providers), as recorded at claim time.
+  notes: null
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: rndrng_prvdr_first_name
+  data_type: char(20)
+  is_nullable: true
+  description: The rendering provider's first name. Populated for individual providers only.
+  notes: null
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: rndrng_prvdr_crdntls
+  data_type: char(20)
+  is_nullable: true
+  description: The rendering provider's credentials as reported on claims (e.g. M.D., D.O.). Free text; formatting varies from the NPPES credential text.
+  notes: null
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: rndrng_prvdr_gndr
+  data_type: char(1)
+  is_nullable: true
+  description: The rendering provider's gender code (M or F). Populated for individual providers only.
+  notes: null
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: rndrng_prvdr_ent_cd
+  data_type: char(1)
+  is_nullable: true
+  description: Entity code distinguishing an individual (I) from an organization (O) rendering provider.
+  notes: Same distinction as NPPES entity_type_code but a different vocabulary -- I/O here vs 1/2 in NPPES; see the mapping to nppes for the translation.
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: rndrng_prvdr_type
+  data_type: char(55)
+  is_nullable: true
+  description: The provider type (specialty description) the provider's services were classified under, derived from the Medicare provider/supplier specialty code on the claims.
+  notes: null
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: rndrng_prvdr_state_abrvtn
+  data_type: char(2)
+  is_nullable: true
+  description: The state abbreviation of the rendering provider's location as recorded on the claims.
+  notes: null
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: tot_benes
+  data_type: num
+  is_nullable: true
+  description: The distinct count of Medicare fee-for-service beneficiaries the provider rendered services to in the data year.
+  notes: Rows aggregating fewer than 11 beneficiaries are suppressed from the file entirely.
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: tot_srvcs
+  data_type: num
+  is_nullable: true
+  description: The total count of services the provider rendered in the data year, summed across all HCPCS (Healthcare Common Procedure Coding System) codes.
+  notes: null
+  update_reason: null
+
+- table_name: provider_summary
+  column_name: tot_mdcr_alowd_amt
+  data_type: num
+  is_nullable: true
+  description: The total Medicare allowed amount for the provider's services in the data year -- the sum of the amounts Medicare deemed payable (Medicare payment plus beneficiary responsibility) across all services.
+  notes: null
+  update_reason: null

@@ -1,0 +1,11 @@
+# data_catalog/sources/ref/codes/tables/entity_type_cd.yaml
+# table_id = ref.codes.<table_name>. One shard per ref table (by
+# convention; stems stay freeform for the corpus loader).
+# The documented columns of each table here must equal the matching
+# data_ref/codes/<table>.csv header and the live DDL columns — the ref
+# loader's consistency gate enforces it.
+
+- table_name: entity_type_cd
+  description: NPPES entity type codes — one row per code with its description. The code distinguishes the two kinds of enumerated provider (individual vs organization); consuming columns (nppes entity_type_code) link here via `ref_table` so a consumer can resolve any code value.
+  notes: 'Provenance: the public NPPES Data Dissemination file layout (CMS). Hand-maintained in data_ref/codes/entity_type_cd.csv (the source of truth; git is the history). The source carries no effective/obsolete dating, so the set is undated.'
+  update_reason: null

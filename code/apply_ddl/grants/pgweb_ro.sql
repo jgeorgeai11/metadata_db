@@ -1,0 +1,33 @@
+-- pgweb_ro.sql
+--
+-- The privilege model for pgweb_ro — the read-only account behind the pgweb
+-- web UI (code/pgweb/). One file per role, but this one is documentation
+-- only: it contains NO statements and is not part of the rebuild psql loop.
+--
+-- pgweb_ro holds no direct grants. It is a LOGIN role created IN ROLE
+-- mcp_ro_metadata, so with inheritance it reaches exactly what that role's
+-- grant script (mcp_ro_metadata.sql) provides — SELECT on all tables in both
+-- schemas, nothing else — and automatically tracks any future change to
+-- those grants. A separate role (rather than reusing mcp_ro_metadata in the
+-- pgweb bookmark) so its password can be rotated independently of the MCP
+-- server's credential.
+--
+-- Provisioned out-of-band by a CREATEROLE role with ADMIN on
+-- mcp_ro_metadata (the DBA-side claudedb_user), because role creation and
+-- ALTER ROLE ... SET both exceed the maintainer's rights. The password is a
+-- secret and is NOT stored here (it lives only in the gitignored pgweb
+-- bookmark, code/pgweb/bookmarks/metadata_db.toml; to rotate or repair,
+-- ALTER ROLE pgweb_ro PASSWORD '<new>' and update that file). For
+-- reference, it was provisioned once as:
+--   CREATE ROLE pgweb_ro LOGIN PASSWORD '<secret>' IN ROLE mcp_ro_metadata;
+--   ALTER ROLE pgweb_ro IN DATABASE metadata_db
+--     SET search_path = catalog, reference;
+--
+-- Rebuild behavior: the role and its membership are cluster-level and
+-- survive DROP DATABASE; its table access reappears when
+-- mcp_ro_metadata.sql is re-run. The one piece a rebuild destroys is the
+-- database-scoped search_path setting above — without it every documented
+-- ltree query pattern fails ("type ltree does not exist"; same rationale as
+-- mcp_ro_metadata.sql, Preconditions). The rebuild runbook's DBA step
+-- re-sets it alongside mcp_ro_metadata's (MAINTAINING.md, *Applying
+-- migrations*).

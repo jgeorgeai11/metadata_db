@@ -1,0 +1,4 @@
+# data_catalog/sources/mup_phy/general/schema.yaml
+description: Schemaless flat-file source -- the Medicare Physician & Other Practitioners public use file has no internal schema concept, so 'general' holds its one documented table (the provider-level summary).
+notes: null
+update_reason: null

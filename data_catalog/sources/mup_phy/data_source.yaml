@@ -1,0 +1,7 @@
+# data_catalog/sources/mup_phy/data_source.yaml
+# data_source_id='mup_phy' (from path).
+
+owner: maintainers
+description: The CMS (Centers for Medicare & Medicaid Services) Medicare Physician & Other Practitioners public use file, provider-level summary -- one row per rendering NPI (National Provider Identifier) and year, aggregating the provider's Medicare Part B fee-for-service utilization, allowed amounts, and payments across all services. Published annually by CMS from carrier and DMEPOS (durable medical equipment, prosthetics, orthotics and supplies) claims.
+notes: Demo corpus source -- documented from the public data dictionary (https://data.cms.gov/provider-summary-by-type-of-service/medicare-physician-other-practitioners). Column selection is a representative subset of the "by Provider" layout.
+update_reason: null

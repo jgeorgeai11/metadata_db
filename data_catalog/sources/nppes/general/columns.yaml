@@ -1,0 +1,152 @@
+# data_catalog/sources/nppes/general/columns.yaml
+# column_id = nppes.general.<table_name>.<column_name>.
+
+# --- npi (main dissemination file) ---
+
+- table_name: npi
+  column_name: npi
+  data_type: char(10)
+  is_nullable: false
+  is_primary_key: true
+  description: The NPI (National Provider Identifier) uniquely assigned to the health care provider. A 10-digit identification number; position 1 is always 1 or 2 and the final digit is a Luhn check digit.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: entity_type_code
+  data_type: char(1)
+  is_nullable: true
+  description: Entity type code distinguishing an individual provider (1) from an organization provider (2). Blank on deactivated records.
+  notes: Determines which name columns are populated -- individual rows carry provider_last_name/provider_first_name, organization rows carry provider_organization_name.
+  ref_table: ref.codes.entity_type_cd
+  update_reason: null
+
+- table_name: npi
+  column_name: replacement_npi
+  data_type: char(10)
+  is_nullable: true
+  description: The NPI that replaced this one, populated only when a deactivated NPI was superseded by a new enumeration.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: provider_organization_name
+  data_type: char(70)
+  is_nullable: true
+  description: The organization provider's legal business name. Populated only for entity_type_code 2 (organization) rows.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: provider_last_name
+  data_type: char(35)
+  is_nullable: true
+  description: The individual provider's legal last name. Populated only for entity_type_code 1 (individual) rows.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: provider_first_name
+  data_type: char(20)
+  is_nullable: true
+  description: The individual provider's first name. Populated only for entity_type_code 1 (individual) rows.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: provider_middle_name
+  data_type: char(20)
+  is_nullable: true
+  description: The individual provider's middle name. Populated only for entity_type_code 1 (individual) rows.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: provider_credential_text
+  data_type: char(20)
+  is_nullable: true
+  description: The individual provider's credential text as self-reported at enumeration (e.g. MD, DO, RN, DDS). Free text, not drawn from a controlled vocabulary.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: provider_gender_code
+  data_type: char(1)
+  is_nullable: true
+  description: The individual provider's self-reported gender code (M or F in the public file). Populated only for entity_type_code 1 (individual) rows.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: provider_enumeration_date
+  data_type: date
+  is_nullable: true
+  description: The date the NPI was assigned to the provider by NPPES.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: last_update_date
+  data_type: date
+  is_nullable: true
+  description: The date the provider's NPPES record was last updated.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: npi_deactivation_date
+  data_type: date
+  is_nullable: true
+  description: The date the NPI was deactivated. Null for active NPIs; on deactivated records most other fields are blanked and this column is the marker.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: npi_reactivation_date
+  data_type: date
+  is_nullable: true
+  description: The date a previously deactivated NPI was reactivated.
+  notes: null
+  update_reason: null
+
+- table_name: npi
+  column_name: healthcare_provider_taxonomy_code_1
+  data_type: char(10)
+  is_nullable: true
+  description: The provider's first Healthcare Provider Taxonomy code slot -- a 10-character alphanumeric code from the NUCC (National Uniform Claim Committee) taxonomy code set classifying provider type and specialization.
+  notes: The full public layout carries 15 numbered taxonomy slots with parallel primary-taxonomy switch columns; this demo corpus documents slot 1 only.
+  update_reason: null
+
+- table_name: npi
+  column_name: is_sole_proprietor
+  data_type: char(1)
+  is_nullable: true
+  description: Whether an individual provider self-reported as a sole proprietor (X = not answered, Y = yes, N = no). Populated only for entity_type_code 1 (individual) rows.
+  notes: null
+  update_reason: null
+
+# --- other_name (Other Name supplemental file) ---
+
+- table_name: other_name
+  column_name: npi
+  data_type: char(10)
+  is_nullable: false
+  description: The NPI (National Provider Identifier) this alternate organization name belongs to. Joins to nppes.general.npi.npi; repeats across rows when one organization carries several alternate names.
+  notes: null
+  update_reason: null
+
+- table_name: other_name
+  column_name: provider_other_organization_name
+  data_type: char(70)
+  is_nullable: false
+  description: An alternate organization name for the provider (a doing-business-as name or former legal business name).
+  notes: null
+  update_reason: null
+
+- table_name: other_name
+  column_name: provider_other_organization_name_type_code
+  data_type: char(1)
+  is_nullable: true
+  description: Code classifying the alternate name (3 = doing business as, 4 = former legal business name, 5 = other name).
+  notes: Small enough to enumerate in place; promote to a ref code set if more consumers appear.
+  update_reason: null

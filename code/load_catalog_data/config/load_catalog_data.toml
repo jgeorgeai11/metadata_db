@@ -1,0 +1,41 @@
+# Configuration for load_catalog_data.py
+#
+# Usage:
+#   uv run code/load_catalog_data/load_catalog_data.py --config code/load_catalog_data/config/load_catalog_data.toml
+#   uv run code/load_catalog_data/load_catalog_data.py --config code/load_catalog_data/config/load_catalog_data.toml --dry-run
+#   METADATA_DB_ALLOW_RESET_HSTRY=1 uv run code/load_catalog_data/load_catalog_data.py --config code/load_catalog_data/config/load_catalog_data.toml --reset-hstry
+#   METADATA_DB_ALLOW_MASS_DELETE=1 uv run code/load_catalog_data/load_catalog_data.py --config code/load_catalog_data/config/load_catalog_data.toml --allow-mass-delete
+#
+# A second reader: the offline corpus checker defaults to this file and
+# reads `data_root` only (the connection fields and the guard knobs are
+# the loader's), so renaming or repurposing `data_root` changes what it
+# validates too.
+#   uv run code/load_catalog_data/check_corpus.py
+
+# Root directory containing the corpus (`systems.yaml` plus the
+# `sources/` tree). Relative paths are resolved from the project root
+# (the directory uv is invoked from).
+data_root = "data_catalog"
+
+# Target Postgres database. The connection host/port/user/password come
+# from the .env file (POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER /
+# POSTGRES_PASSWORD). The database name is not a secret and lives here.
+database = "metadata_db"
+
+# Postgres schema that every metadata_db object lives in. Applied via the
+# connection's search_path (options='-c search_path=<schema>'), so the
+# loader's SQL stays schema-unqualified and resolves to this schema.
+schema = "catalog"
+
+# Mass-delete guard. Deletes are computed by absence (a DB row missing
+# from the YAML corpus is deleted), so a wrong data_root, a half-finished
+# folder rename, or a botched merge would silently become mass deletion.
+# The loader refuses — in dry-run and real runs alike — when a diff would
+# delete more than mass_delete_fraction of the DB's current rows, once at
+# least mass_delete_min_count rows are being deleted (the absolute floor
+# keeps small corpora from tripping on routine cleanups). For an intended
+# mass removal (e.g. decommissioning a data source), raise these knobs in the
+# same MR, or run the loader manually with --allow-mass-delete (requires
+# METADATA_DB_ALLOW_MASS_DELETE=1).
+mass_delete_fraction = 0.25
+mass_delete_min_count = 20

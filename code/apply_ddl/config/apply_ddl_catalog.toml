@@ -1,0 +1,26 @@
+# Configuration for apply_ddl.py
+#
+# Usage:
+#   uv run code/apply_ddl/apply_ddl.py --config code/apply_ddl/config/apply_ddl_catalog.toml
+#   uv run code/apply_ddl/apply_ddl.py --config code/apply_ddl/config/apply_ddl_catalog.toml --create-db
+#   uv run code/apply_ddl/apply_ddl.py --config code/apply_ddl/config/apply_ddl_catalog.toml --check
+
+# Directory containing numbered .sql migration files. Relative paths are
+# resolved from the project root (the directory uv is invoked from).
+ddl_dir = "code/apply_ddl/ddl_catalog"
+
+# Target Postgres database. The connection host/port/user/password come
+# from the .env file (POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER /
+# POSTGRES_PASSWORD). The database name is not a secret and lives here.
+database = "metadata_db"
+
+# Postgres schema that every metadata_db object lives in. Applied via the
+# connection's search_path (options='-c search_path=<schema>'), so the DDL
+# stays schema-unqualified and installs into whatever schema is named here.
+# apply_ddl.py creates it if absent before applying any migration.
+schema = "catalog"
+
+# Optional schema-level COMMENT ON SCHEMA, applied by apply_ddl.py's
+# bootstrap on every run (a schema-agnostic migration cannot carry it —
+# same rationale as the ddl_versions comment). Edit and re-apply to update.
+schema_comment = "The metadata_db catalog — documented systems, data sources, schemas, tables, columns, deployments, relationships, mappings, and concepts, loaded from data_catalog/ by load_catalog_data.py"

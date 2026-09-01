@@ -1,0 +1,13 @@
+# data_catalog/sources/ref/deployments.yaml
+# Venues this data source is materialized in. The ref tables are deployed
+# to exactly one venue: the metadata_db Postgres instance itself
+# (registered as the `metadata_db` system). The documented labels
+# (`ref.codes.*`) map to the physical address (`metadata_db.reference.*`)
+# via the standard rename knobs: database_name renames the physical
+# database, and the schemas map renames the documented `codes` schema to
+# the physical `reference` schema (the documented name is a content
+# label; the physical name lives only here).
+- system: metadata_db
+  database_name: metadata_db
+  schemas:
+    codes: reference

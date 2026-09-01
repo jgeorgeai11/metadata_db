@@ -1,0 +1,7 @@
+# data_catalog/sources/nppes/data_source.yaml
+# data_source_id='nppes' (from path).
+
+owner: maintainers
+description: The NPPES (National Plan and Provider Enumeration System) NPI (National Provider Identifier) registry, as published in the CMS (Centers for Medicare & Medicaid Services) monthly full-replacement public dissemination file. One row per NPI; covers individual and organization provider demographics, enumeration and deactivation dates, taxonomy, and alternate organization names. NPPES is the national registry that assigns and enumerates NPIs for covered health care providers.
+notes: Demo corpus source — documented from the public NPPES Data Dissemination file layout (https://download.cms.gov/nppes/NPI_Files.html). Column selection is a representative subset of the full public layout.
+update_reason: null

@@ -1,0 +1,8 @@
+# data_catalog/sources/ref/codes/schema.yaml
+# schema_id='ref.codes', schema_name='codes' (from path).
+# Physically the `reference` schema in the metadata_db instance (see
+# ../deployments.yaml).
+
+description: The curated code-set tables — one real typed table per code set, each enumerating a coded column's value domain (code, description, and set-specific attributes). Seeded from data_ref/codes/*.csv by the ref loader; git/PR review is the change discipline.
+notes: null
+update_reason: null

@@ -1,0 +1,33 @@
+# Configuration for apply_ddl.py — the `ref` reference-schema migration
+# stream (curated code-set tables; see code/load_ref_data/).
+#
+# apply_ddl.py is schema-agnostic, so the physical `reference` schema gets
+# numbered migrations, checksums, and the sync check with zero new tooling —
+# this second config simply points the same script at the ref DDL directory
+# and schema. Each schema keeps an INDEPENDENT ddl_versions ledger
+# (apply_ddl auto-creates one in whatever schema search_path names), so
+# check_schema_in_sync must run --check once per config.
+#
+# Usage:
+#   uv run code/apply_ddl/apply_ddl.py --config code/apply_ddl/config/apply_ddl_ref.toml
+#   uv run code/apply_ddl/apply_ddl.py --config code/apply_ddl/config/apply_ddl_ref.toml --check
+
+# Directory containing the ref stream's numbered .sql migration files. It
+# lives under code/load_ref_data/ beside the ref data loader so the ref
+# pipeline is one module.
+ddl_dir = "code/apply_ddl/ddl_ref"
+
+# Target Postgres database — the same instance that hosts the catalog; the
+# ref tables are deployed to the metadata_db Postgres itself (registered as
+# the `metadata_db` system in data_catalog/systems.yaml).
+database = "metadata_db"
+
+# Postgres schema the ref tables live in. Documented in the catalog as the
+# `ref.codes` schema mapping to the physical address metadata_db.reference
+# (see data_catalog/sources/ref/deployments.yaml).
+schema = "reference"
+
+# Optional schema-level COMMENT ON SCHEMA, applied by apply_ddl.py's
+# bootstrap on every run (a schema-agnostic migration cannot carry it —
+# same rationale as the ddl_versions comment). Edit and re-apply to update.
+schema_comment = "Curated reference code tables (value domains for catalog columns), loaded from data_ref/ CSVs by load_ref_data.py"

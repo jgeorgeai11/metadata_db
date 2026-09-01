@@ -1,0 +1,35 @@
+# Configuration for revert_merge.py
+#
+# Usage:
+#   uv run code/revert_merge/revert_merge.py --config code/revert_merge/config/revert_merge.toml --commit-sha "$GITHUB_SHA"
+#
+# The script is invoked by the `revert_failed_load` CI job (see
+# .github/workflows/post_merge.yml and MAINTAINING.md)
+# when a post-merge load fails. It authenticates as the cleanup bot via
+# CLEANUP_BOT_TOKEN from the environment, verifies preconditions, and
+# pushes a clean `git revert -m 1 <sha>` directly to `main`.
+
+# Authenticated remote URL template. The literal `{token}` placeholder
+# is substituted at runtime with the value of the CLEANUP_BOT_TOKEN env
+# var via Python's str.format(). The token is NEVER stored here.
+# The `x-access-token` username is what GitHub expects for a GitHub App
+# installation token; a fine-grained PAT also authenticates in the
+# password position with any username, so the same template serves both
+# bot-identity options (see "Cleanup bot account" in the maintenance doc).
+remote_url_template = "https://x-access-token:{token}@github.com/jgeorgeai11/metadata_db.git"
+
+# Branch the script operates on. The cleanup bot is the only identity
+# permitted to push directly to this branch (via a branch-protection
+# bypass allowance — see "Cleanup bot account" in
+# MAINTAINING.md).
+main_branch = "main"
+
+# Git identity the revert commit is authored/committed under. `git revert`
+# creates a commit, and a stock CI container configures no identity, so
+# these are required — the script passes them as `-c user.name=… -c
+# user.email=…` on the revert invocation. The `<...>` placeholders are
+# refused by the config sanity block until an operator fills them in with
+# the cleanup bot account's name and email (see the activation checklist in
+# MAINTAINING.md).
+bot_name = "<cleanup-bot-name>"
+bot_email = "<cleanup-bot-email>"

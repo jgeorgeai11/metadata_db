@@ -1,0 +1,7 @@
+# data_catalog/sources/mup_phy/general/tables.yaml
+# table_id = mup_phy.general.<table_name>.
+
+- table_name: provider_summary
+  description: One row per rendering NPI (National Provider Identifier) per data year -- the provider-level ("by Provider") summary of Medicare Part B fee-for-service utilization and payment, aggregated across all of the provider's services. Carries the provider's demographics as recorded at claim time alongside beneficiary counts, service counts, and allowed/payment amounts.
+  notes: 'Provider demographic columns (name, credentials, gender, entity code) are copied from the provider''s enrollment/claim records for the data year and can lag or disagree with the live NPPES registry record -- resolve identity through the NPI, not through the demographic columns. CMS suppresses rows aggregating fewer than 11 beneficiaries, so low-volume providers are absent by design.'
+  update_reason: null

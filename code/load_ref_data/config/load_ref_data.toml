@@ -1,0 +1,37 @@
+# Configuration for load_ref_data.py — the ref-schema code-set loader.
+#
+# Usage:
+#   uv run code/load_ref_data/load_ref_data.py --config code/load_ref_data/config/load_ref_data.toml
+#   uv run code/load_ref_data/load_ref_data.py --config code/load_ref_data/config/load_ref_data.toml --dry-run
+#   uv run code/load_ref_data/load_ref_data.py --config code/load_ref_data/config/load_ref_data.toml --check
+#
+# Connection host/port/user/password come from .env (POSTGRES_*); a real
+# load needs maintainer credentials (TRUNCATE + INSERT on the reference
+# schema), while --dry-run/--check run under the read-only role.
+
+# Required fields
+
+# Directory holding one CSV per ref table (data_ref/<schema>/<table>.csv,
+# the folder naming the table's documented schema — enforced by the
+# loader). Lives OUTSIDE data_catalog/ deliberately: data_catalog/ is the
+# corpus (metadata about the world); data_ref/ is the one piece of the
+# world the repo itself hosts — keeping them separate keeps the corpus
+# YAML discovery walk irrelevant to ref data.
+csv_dir = "data_ref"
+
+# Target Postgres database and schema — the metadata_db instance's
+# `reference` schema (must match code/apply_ddl/config/apply_ddl_ref.toml).
+database = "metadata_db"
+schema = "reference"
+
+# Optional fields (defaults shown in comments)
+
+# The ref source's corpus folder, read by the docs consistency gate
+# (documented columns must equal the CSV header/DDL columns).
+docs_dir = "data_catalog/sources/ref"  # default: "data_catalog/sources/ref"
+
+# Curated-set guardrail: a CSV with more data rows than this refuses to
+# load. Blocks open-ended domains (NDC, ICD) from being smuggled in as
+# "code sets" — those are data, documented the ordinary way. Raise it
+# deliberately, in a reviewed MR, if a genuinely curated set outgrows it.
+max_rows_per_table = 1000  # default: 1000

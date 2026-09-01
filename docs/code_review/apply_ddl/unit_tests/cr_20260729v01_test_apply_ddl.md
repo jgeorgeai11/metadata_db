@@ -1,0 +1,40 @@
+---
+name: cr_20260729v01_test_apply_ddl
+goal: Re-review of code/apply_ddl/unit_tests/test_apply_ddl.py since cr_20260717v01, covering the catalog-schema / deployment_tables changes, against the python-development unit-tests, comments, docstrings, type-hints, and exception-handling skills.
+created: 2026-07-29 14:36:52
+updated: 2026-07-29 14:36:52
+---
+
+## Implementation Plan
+
+1. [completed] Add direct unit tests for the two schema-probe helpers - `code/apply_ddl/unit_tests/test_apply_ddl.py`
+   - 1.1. [major] Lines 467-510, 900-928: `apply_ddl.schema_present` and `apply_ddl.has_schema_usage` are public functions but have no direct unit test — they are replaced by `MagicMock` in the `patched_run` fixture (lines 484-487) and are also mocked in the only two tests that name them (`test_run_check_absent_schema_no_privilege_raises` at 900 and `test_run_check_absent_schema_genuinely_missing_all_pending` at 914). As a result their bodies (`apply_ddl.py:388-392` and `412-414` — the `pg_namespace` lookup and the `has_schema_privilege(...)` call plus its `bool(...)` parse) are never executed by any test, so `pytest --cov` would report them uncovered. This violates unit-tests guideline 7 ("Every public function should have tests") and 7.1 ("Cover all paths"), and is inconsistent with the sibling read-only helpers `ddl_versions_exists` and `applied_migrations`, which each have direct `fake_conn`/`fake_cursor` tests (lines 239-275). Add a direct test per helper, exercising both the true and false return via `fake_cursor.fetchone.return_value`.
+        - Current: (no direct test; both helpers mocked in `patched_run` — lines 484-487 — and in the check-mode tests at 900-928)
+        - Expected: add e.g. `test_schema_present_true_when_exists` / `test_schema_present_false_when_absent` and `test_has_schema_usage_true_when_granted` / `test_has_schema_usage_false_when_denied`, driving `fake_cursor.fetchone.return_value` and asserting the boolean result (mirroring `test_ddl_versions_exists_*`)
+        - Resolution: Implemented as specified, with one addition. Added all four tests (`test_schema_present_true_when_exists`, `test_schema_present_false_when_absent`, `test_has_schema_usage_true_when_granted`, `test_has_schema_usage_false_when_denied`) under the read-only-helpers divider, mirroring the `test_ddl_versions_exists_*` `fake_conn`/`fake_cursor` pattern and asserting `commit` is not called. Beyond the documented fix, each true-path test also asserts the schema name is the sole bound parameter (`fake_cursor.execute.call_args[0][1] == ("catalog",)`), and the divider was extended to name both helpers so the section map stays accurate (per the map-accuracy principle in 2.1). `pytest --cov=apply_ddl --cov-report=term-missing` now reports the helper bodies (apply_ddl.py:388-392, 412-414) covered — the only remaining misses (286, 621) are unrelated to this finding. All 132 tests pass.
+
+2. [completed] Keep the section divider an accurate map of the tests beneath it - `code/apply_ddl/unit_tests/test_apply_ddl.py`
+   - 2.1. [minor] Line 744: The divider reads `check_no_transaction_control / strip_sql_comments`, but no test in that block (lines 748-818) — or anywhere in the file — targets `apply_ddl.strip_sql_comments` directly; it is only exercised transitively through the `check_no_transaction_control` comment tests (lines 765-780). The prior review chain treats these dividers as the file's structural map that must stay accurate (see `cr_20260717v01` finding 1.1, and `cr_20260702v01` before it). Either add a direct `strip_sql_comments` test (line/block comment removal) so the header is truthful, or drop `strip_sql_comments` from the divider since its coverage is folded into the transaction-control tests.
+        - Current: `# check_no_transaction_control / strip_sql_comments`
+        - Expected: add `test_strip_sql_comments_removes_line_and_block_comments` under this divider, or narrow the header to `# check_no_transaction_control`
+        - Resolution: Deferred — maintainer scoped this pass to the major finding (1.1) only. The divider staleness is a cosmetic map-accuracy nit with no coverage impact; left for a future test pass.
+
+3. [completed] Optional cleanup-assertion symmetry for the run() happy paths - `code/apply_ddl/unit_tests/test_apply_ddl.py`
+   - 3.1. [suggestion] Lines 632-668: The `run()` happy-path tests assert branching (which migrations apply, when create/verify/schema fire) but none asserts that the target connection is closed. `run()` closes it in a `finally` block (`apply_ddl.py:652-653`); if that cleanup were dropped, every `run` test would still pass. This is the same gap already locked in for `create_database_if_absent` (asserted at lines 420, 439, 459) and carried forward unresolved from `cr_20260713v01` (1.1) and `cr_20260717v01` (2.1). Adding one close assertion to a happy-path test (e.g. `test_run_applies_only_pending`) would restore that symmetry.
+        - Current: `apply_ddl.run(_config(), check_only=False, create_db=False)` (no cleanup assertion)
+        - Expected: add `patched_run["connect"].return_value.close.assert_called_once()` after the call
+        - Resolution: Deferred — optional cleanup-assertion symmetry, not a defect; deliberated and deferred across cr_20260713v01 and cr_20260717v01 and unchanged by the catalog-schema work. Left for a future dedicated test-cleanup pass.
+
+## Skills with No Issues
+
+1. unit-tests skill: One major and one minor - see 1.1 (missing direct tests for `schema_present`/`has_schema_usage`) and 2.1 (divider names an untested-directly helper), plus the deferred suggestion 3.1. Otherwise strong: pytest (not unittest), correct `test_<function>_<scenario>_<expected>` naming, `conftest.py` fixtures (`fake_conn`/`fake_cursor`), and good use of `tmp_path`/`monkeypatch`/`caplog`. `@pytest.mark.parametrize` (e.g. 138-152, 154-179, 748-757, 1268-1303), `pytest.raises(..., match=...)`, per-test isolation, and the call-order pattern in `test_run_apply_mode_creates_schema_before_ddl_versions` (584-604) are used well. The static-DDL-invariant tests correctly track the recent rename (`deployment_tables`, lines 1289-1301, 1333-1337, 1378) and the grant-list agreement (1209-1235). The stdlib `unittest.mock` + `monkeypatch` combination (instead of `mocker.patch()`) remains an accepted project deviation; mocking `run()`'s own leaf helpers is documented in the module docstring (lines 4-7).
+2. type-hints skill: No issues found. All test functions, fixtures, and helpers carry parameter and return annotations using modern syntax (`list[tuple[str, Path]]`, `dict[str, MagicMock]`, `set[str]`, `-> None`); the `*a: object, **k: object` stubs are appropriately typed for throwaway callables.
+3. docstrings skill: No issues found. The module docstring and the `_migrations`/`patched_run`/`_config`/`_ddl_text_without_comments`/`_created_tables`/`_table_body` helper docstrings are present and explain intent; individual test functions are conventionally self-documenting via their names, consistent with the unit-tests skill.
+4. comments skill: No issues found beyond the divider staleness captured in 2.1. Inline comments (e.g. 48-49, 85-90, 118-120, 169-173, 280-283, 333-335, 413-418, 537, 566, 638, 1179-1187) explain the "why" and are accurate against the current source.
+5. exception-handling skill: No issues found. Expected errors are asserted with `pytest.raises(..., match=...)`; error-injection stubs raise specific types (`RuntimeError`, `KeyError`, `SystemExit`, `psycopg2.Error`); no bare excepts in test code.
+6. logging skill: N/A - test module; `setup_logging` is stubbed and `caplog` is used correctly to assert on emitted ERROR/INFO text in the `main()` tests (e.g. 968-1007, 1073-1100).
+7. executable-scripts skill: N/A - this is a test module, not a CLI entry point.
+8. data-validation skill: N/A - no data-output validation logic in the tests.
+9. SQL best-practices skill: N/A - SQL appears only as literal assertion substrings; no queries are authored in this file.
+</content>
+</invoke>
